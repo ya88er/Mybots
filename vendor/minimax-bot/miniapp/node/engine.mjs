@@ -162,6 +162,7 @@ export class Engine {
    *   agent: MiniAppAgentClient | undefined,
    *   logger: import('./miniapp-api.js').MiniAppLogger,
    *   broadcast: (event: Record<string, unknown>) => void,
+   *   scheduleCatchUp?: (scheduleId: string, nextRunAt: number) => Promise<boolean> | boolean,
    * }} deps
    */
   constructor(deps) {
@@ -169,6 +170,16 @@ export class Engine {
     this.memory = deps.memory;
     this.agent = deps.agent;
     this.logger = deps.logger;
+    /**
+     * The Host's schedule catch-up record.
+     *
+     * It answers "was this occurrence already delivered?", so a schedule that
+     * came due while the Host was closed is delivered exactly once, even if
+     * the Host restarts before the schedule's next slot. When it is absent,
+     * the upstream behaviour is unchanged.
+     * @type {((scheduleId: string, nextRunAt: number) => Promise<boolean> | boolean) | undefined}
+     */
+    this.scheduleCatchUp = deps.scheduleCatchUp;
     /** Waits before each automatic retry of a failed turn (tests shorten them). */
     this.retryDelays = deps.retryDelaysMs ?? TURN_RETRY_DELAYS_MS;
     /** @type {{ at: number, value: Promise<any> } | undefined} */
@@ -1563,6 +1574,15 @@ export class Engine {
         changed = true;
       }
       if (schedule.nextRunAt > now) continue;
+      // A schedule that came due while the Host was closed is overdue, and the
+      // Host delivers it exactly once. The Host's catch-up record says whether
+      // this occurrence has already been delivered, so a restart before the
+      // next slot does not deliver it twice.
+      if (this.scheduleCatchUp && (await this.scheduleCatchUp(schedule.id, schedule.nextRunAt))) {
+        schedule.nextRunAt = nextRun(schedule, now + 1000);
+        changed = true;
+        continue;
+      }
       await this.fireSchedule(schedule, now, { save: false });
       changed = true;
     }

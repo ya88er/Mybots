@@ -1,6 +1,6 @@
 # MiniBots implementation acceptance
 
-Status: M0, M1 and M2 complete. Evidence below is real: every
+Status: M0, M1, M2 and M3 complete. Evidence below is real: every
 checked row names the command that produced it. Rows that could not be run
 say so.
 
@@ -185,10 +185,41 @@ to the vendored tree).
   - `loadSkills`, `discoverAndLoadExtensions` and `createMcpExtension` are
     confirmed present in Pi 1.4.0. End-to-end behaviour is not yet exercised.
 - [ ] MCP failure, reconnect, cancellation, and authentication are tested.
-  - Not yet.
+  - The **authentication** half is proven: the app's own MCP transport sits
+    behind the bearer-token gate (`tests/integration/backend-gate.test.ts`),
+    and the tool dispatch replaces the model-supplied caller
+    (`tests/integration/tool-dispatch.test.ts`).
+  - The failure, reconnect and cancellation halves need the external MCP
+    integration (M5).
+- [x] An interrupted dispatch is reported as uncertain, never as success and never replayed.
+  - **Proven** by `tests/integration/recovery.test.ts` → **8/8 pass**.
+  - The dispatch ledger records every admission **before** the dispatch starts,
+    and the outcome when it settles. A record that is still `admitted` when
+    the app starts again becomes `unknown` — the app may have done the work,
+    and it says so rather than claiming success or repeating the side effect.
+  - A settled dispatch stays settled across a restart.
+  - A corrupt ledger file does not stop the app, and the ledger is bounded.
+  - The ledger is served at `/api/app/dispatches` for the inspector.
+- [x] A session's Pi session survives a restart.
+  - **Proven** by `tests/integration/recovery.test.ts` and
+    `tests/integration/schedule-catchup.test.ts`.
+  - The app owns the association between an application session and a Pi
+    session, because Pi writes a session file only once the session has
+    content and the app therefore cannot rediscover it from the filesystem.
+    The association is written as soon as it changes, and it is restored when
+    the backend starts.
+  - A cleared chat starts a new **generation** and does not reuse the old
+    session, so a late completion from the previous generation cannot enter
+    the new chat.
+- [x] A schedule that came due while the app was closed is delivered once.
+  - **Proven** by `tests/integration/schedule-catchup.test.ts` → **4/4 pass**.
+  - The upstream scheduler already moves a schedule's next run forward when it
+    fires, so an overdue schedule fires once rather than once per missed
+    occurrence. The app adds the catch-up record that says *whether this
+    occurrence has already been delivered*, so a restart before the next slot
+    does not deliver it twice, while the next slot is a new delivery.
 
 ## MiniBots feature parity
-
 All rows in this section are **not yet started**. The upstream feature set is
 imported intact and its 343 upstream tests pass, so the starting point is
 sound, but no parity row has an observed installed-app result yet.

@@ -172,6 +172,13 @@ export interface PiAdapterOptions {
   readonly sessionDir: string;
   /** The application session index. */
   readonly sessions: SessionRegistry;
+  /**
+   * Called whenever the session index changes.
+   *
+   * The association must be durable before a turn is acknowledged, so the
+   * backend persists it here.
+   */
+  readonly onSessionsChanged?: (sessions: SessionAssociation[]) => void;
   /** Supplies a provider API key, if one is configured. */
   readonly credential?: (providerId: string) => string | undefined;
   /** The tools available to every run, before session binding. */
@@ -183,6 +190,27 @@ export interface PiAdapterOptions {
    * drives Pi's real loop without a network call.
    */
   readonly provider?: (runtime: ModelRuntime) => void;
+  /**
+   * Called when a run is admitted, with the dispatch's identity.
+   *
+   * The backend uses this to write the dispatch ledger.
+   */
+  readonly onAdmit?: (record: {
+    id: string;
+    kind: 'turn' | 'tool' | 'task' | 'schedule';
+    subject: string;
+    chatId: string;
+    sessionId?: string;
+    runId?: string;
+  }) => void;
+  /**
+   * Called when a run settles.
+   */
+  readonly onSettle?: (
+    id: string,
+    state: 'settled' | 'failed' | 'cancelled' | 'unknown',
+    reason?: string,
+  ) => void;
 }
 
 /** A live Pi session plus the state of the run in flight. */
@@ -594,6 +622,19 @@ export class PiAdapter {
       live.sessionManager.getSessionFile(),
       model,
     );
+    this.#options.onSessionsChanged?.(this.#options.sessions.all());
+
+    // The dispatch is recorded before the turn starts, so a crash leaves
+    // evidence that it was attempted.
+    const dispatchId = `dispatch_${turnId}`;
+    this.#options.onAdmit?.({
+      id: dispatchId,
+      kind: 'turn',
+      subject: association.botId,
+      chatId: association.chatId,
+      sessionId: association.id,
+      runId: turnId,
+    });
 
     const signal = options.signal;
     const onAbort = () => {
@@ -620,6 +661,7 @@ export class PiAdapter {
       // not the Bot's reply, and the engine waits for the user.
       const pending = live.pendingQuestion;
       mapper.finish(aborted ? 'aborted' : 'finished', pending ? undefined : finalText);
+      this.#options.onSettle?.(dispatchId, aborted ? 'cancelled' : 'settled');
       settle({
         sessionId,
         turnId,
@@ -638,6 +680,13 @@ export class PiAdapter {
           code: aborted ? 'REQUEST_CANCELLED' : 'AGENT_UNAVAILABLE',
           message: error instanceof Error ? error.message : String(error),
         },
+      );
+      // A turn that failed after the model was reached may still have done
+      // something: its outcome is unknown, not failed.
+      this.#options.onSettle?.(
+        dispatchId,
+        aborted ? 'cancelled' : 'unknown',
+        error instanceof Error ? error.message : String(error),
       );
       throw error;
     }

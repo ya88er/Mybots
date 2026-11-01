@@ -26,8 +26,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { start as startMiniApp } from './upstream-miniapp.ts';import { DispatchingAgent, withCaller, type CallerIdentity } from '../runtime/dispatching-agent.ts';
+import { DispatchLedger } from '../runtime/dispatch-ledger.ts';
 import { PiAdapter, type BoundTool } from '../runtime/pi-adapter.ts';
-import { SessionRegistry } from '../runtime/session-registry.ts';
+import { SessionIndex } from '../runtime/session-index.ts';
+import { SessionRegistry, type SessionAssociation } from '../runtime/session-registry.ts';
+import { ScheduleCatchUp } from '../runtime/schedule-catchup.ts';
+import { inspectSessions } from '../runtime/session-inspector.ts';
 import { ToolDispatch, type UpstreamDispatch } from '../tools/tool-dispatch.ts';
 
 export interface BackendOptions {
@@ -82,6 +86,10 @@ export async function startBackend(options: BackendOptions): Promise<{
   stop: () => Promise<void>;
   /** The application session index, for the session inspector. */
   sessions: SessionRegistry;
+  /** The dispatch ledger, for the inspector and the recovery report. */
+  ledger: DispatchLedger;
+  /** The app's own routes, served by the gate. */
+  routes: (path: string, method: string) => Promise<{ status: number; body: unknown } | undefined>;
 }> {
   const log =
     options.log ??
@@ -95,6 +103,31 @@ export async function startBackend(options: BackendOptions): Promise<{
   await mkdir(options.agentDir, { recursive: true });
 
   const sessions = new SessionRegistry();
+
+  // The durable session index: the app's own record of which Pi session
+  // belongs to which chat, because Pi writes a session file only once the
+  // session has content.
+  const sessionIndex = new SessionIndex({ path: join(options.dataDir, 'sessions.json') });
+  const stored = await sessionIndex.load().catch(() => [] as SessionAssociation[]);
+  sessions.load(stored);
+  // The index is written at start-up too, so the file exists even when no
+  // session has been created yet.
+  await sessionIndex.save(sessions.all()).catch(() => {});
+  if (stored.length) {
+    log('info', 'minibots.sessions_restored', { count: stored.length });
+  }
+
+  // The dispatch ledger records every admission, so a restart can tell a
+  // known outcome from an unknown one.
+  const ledger = new DispatchLedger({
+    path: join(options.dataDir, 'dispatch-ledger.json'),
+    log,
+  });
+  await ledger.load();
+  const reconciled = await ledger.reconcile();
+  if (reconciled.length) {
+    log('warn', 'minibots.dispatches_unknown', { count: reconciled.length });
+  }
 
   // The abort signal shuts the whole backend down: the upstream server
   // listens for it and disposes itself.
@@ -153,9 +186,39 @@ export async function startBackend(options: BackendOptions): Promise<{
     sessions,
     ...(options.credential ? { credential: options.credential } : {}),
     tools: () => tools.tools(),
+    // The session index is written as soon as it changes, so a crash never
+    // loses the association between a chat and its Pi session.
+    onSessionsChanged: (records) => {
+      void sessionIndex.save(records).catch((error: unknown) => {
+        log('warn', 'minibots.sessions_save_failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+    // The dispatch ledger records every admission and every outcome, so a
+    // restart can tell a known outcome from an unknown one.
+    onAdmit: (record) => {
+      void ledger.admit(record).catch((error: unknown) => {
+        log('warn', 'minibots.ledger_admit_failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+    onSettle: (id, state, reason) => {
+      void ledger.settle(id, state, reason).catch((error: unknown) => {
+        log('warn', 'minibots.ledger_settle_failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
   });
 
   const agent = new DispatchingAgent({ adapter });
+
+  // The schedule catch-up record: a schedule that came due while the app was
+  // closed is delivered exactly once, even across a restart.
+  const catchUp = new ScheduleCatchUp({ path: join(options.dataDir, 'schedule-catchup.json') });
+  await catchUp.load();
 
   const lifecycle = await startMiniApp({
     pluginId: 'minimax-bot',
@@ -165,6 +228,13 @@ export async function startBackend(options: BackendOptions): Promise<{
     signal: controller.signal,
     logger: makeLogger(log),
     agent,
+    // The engine asks this before it delivers an overdue schedule. It answers
+    // "has this occurrence already been delivered?", and records the answer.
+    scheduleCatchUp: async (scheduleId: string, nextRunAt: number) => {
+      if (await catchUp.alreadyDelivered(scheduleId, nextRunAt)) return true;
+      await catchUp.record(scheduleId, nextRunAt);
+      return false;
+    },
   });
 
   upstreamDispatch = lifecycle.dispatch as UpstreamDispatch | undefined;
@@ -175,13 +245,48 @@ export async function startBackend(options: BackendOptions): Promise<{
 
   log('info', 'minibots.backend_listening', { port, tools: upstreamDispatch.names().length });
 
+  /**
+   * The app's own routes.
+   *
+   * The upstream server's routing is a closure, so it cannot be extended
+   * without changing a vendored file. These routes are therefore served by
+   * the gate, in front of the upstream server, where the app owns the code.
+   */
+  const routes = async (
+    path: string,
+    method: string,
+  ): Promise<{ status: number; body: unknown } | undefined> => {
+    if (method === 'GET' && path === '/api/app/sessions') {
+      return { status: 200, body: inspectSessions(sessions) };
+    }
+    if (method === 'GET' && path === '/api/app/dispatches') {
+      // The dispatch ledger: what the app admitted, and what it knows about
+      // each outcome. An `unknown` outcome is reported as unknown.
+      return {
+        status: 200,
+        body: {
+          records: ledger.all(),
+          unsettled: ledger.unsettled().length,
+        },
+      };
+    }
+    return undefined;
+  };
+
   const stop = async (): Promise<void> => {
     controller.abort();
+    // The session associations are written last: they are the only thing
+    // that lets a chat find its Pi session again after a restart.
+    await sessionIndex.save(sessions.all()).catch((error: unknown) => {
+      log('warn', 'minibots.sessions_save_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
     await Promise.resolve(lifecycle?.dispose?.());
     await adapter.dispose();
   };
 
-  return { ready: { port, host: '127.0.0.1', token: options.token }, stop, sessions };
+  return { ready: { port, host: '127.0.0.1', token: options.token }, stop, sessions, ledger, routes };
 }
 
 /**

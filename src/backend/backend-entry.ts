@@ -13,7 +13,6 @@
  */
 import { startBackend } from './backend-host.ts';
 import { startGate } from './backend-gate.ts';
-import { inspectSessions } from '../runtime/session-inspector.ts';
 
 /** The message the main process listens for. */
 interface ParentProcess {
@@ -95,12 +94,7 @@ try {
     log,
     // The app's own routes. The upstream server's routing is a closure, so
     // it cannot be extended without changing a vendored file.
-    routes: async (path, method) => {
-      if (method === 'GET' && path === '/api/app/sessions') {
-        return { status: 200, body: inspectSessions(backend.sessions) };
-      }
-      return undefined;
-    },
+    routes: backend.routes,
   });
 
   log('info', 'minibots.backend_ready', { port: gate.port });

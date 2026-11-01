@@ -70,6 +70,14 @@ export interface MiniAppContext {
   readonly signal: AbortSignal;
   readonly logger: MiniAppLogger;
   readonly agent?: MiniAppAgentClient;
+  /**
+   * The Host's schedule catch-up record.
+   *
+   * It answers "was this occurrence already delivered?", so a schedule that
+   * came due while the Host was closed is delivered exactly once — even if
+   * the Host restarts before the schedule's next slot.
+   */
+  readonly scheduleCatchUp?: (scheduleId: string, nextRunAt: number) => Promise<boolean> | boolean;
 }
 
 /** The lifecycle the upstream Mini App returns. */

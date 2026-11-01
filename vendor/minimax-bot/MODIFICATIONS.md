@@ -151,7 +151,38 @@ still passes 343/343.
 
 ---
 
-## 6. What was NOT changed
+## 6. The schedule catch-up hook
+
+**`miniapp/node/engine.mjs`** and **`miniapp/node/server.mjs`**
+
+The `Engine` accepts an optional `scheduleCatchUp` dependency, and
+`tickSchedules` asks it before it delivers an overdue schedule:
+
+```js
+if (this.scheduleCatchUp && (await this.scheduleCatchUp(schedule.id, schedule.nextRunAt))) {
+  schedule.nextRunAt = nextRun(schedule, now + 1000);
+  changed = true;
+  continue;
+}
+```
+
+**Why.** The implementation plan requires "one catch-up delivery per overdue
+schedule". The upstream already delivers an overdue schedule once and moves
+its `nextRunAt` forward — but it keeps no record that it did. If the app
+restarts before the schedule's next slot, the upstream cannot tell an
+un-delivered occurrence from one it already delivered.
+
+The Host's catch-up record answers exactly that question. When the hook is
+absent, the upstream behaviour is unchanged, so the upstream suite still
+passes 343/343 with no test modified.
+
+**The upstream's own behaviour is preserved:** the schedule still fires, still
+posts its note into its Bot's chat and still moves to its next slot. Only a
+*duplicate* catch-up is suppressed.
+
+---
+
+## 7. What was NOT changed
 
 - The engine's business logic: groups, relay guards, group notes, memory
   selection, helper admission, schedules, usage metering.

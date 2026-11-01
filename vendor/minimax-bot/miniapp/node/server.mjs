@@ -134,7 +134,16 @@ export async function start(context) {
     }
   };
 
-  const engine = new Engine({ store, memory, agent: context.agent, logger: context.logger, broadcast });
+  const engine = new Engine({
+    store,
+    memory,
+    agent: context.agent,
+    logger: context.logger,
+    broadcast,
+    // The Host's catch-up record, when it has one. It is what makes a
+    // schedule that came due while the Host was closed deliver exactly once.
+    ...(context.scheduleCatchUp ? { scheduleCatchUp: context.scheduleCatchUp } : {}),
+  });
   const team = new Team({ store, memory, engine, broadcast });
   const handleMcp = createMcpHandler({ team, engine });
 

@@ -60,15 +60,27 @@ export class AtomicJsonFile<T> {
     return this.#path;
   }
 
-  /** Read the document, or `fallback` when it does not exist. */
+  /**
+   * Read the document, or `fallback` when it does not exist.
+   *
+   * A file that exists but cannot be parsed is treated as absent: a
+   * half-written or corrupted document must not stop the app from starting.
+   * The caller is told through `fallback`, and the file is replaced on the
+   * next write.
+   */
   async read(fallback: T): Promise<T> {
+    let raw: string;
     try {
-      const raw = await readFile(this.#path, 'utf8');
-      return JSON.parse(raw) as T;
+      raw = await readFile(this.#path, 'utf8');
     } catch (error) {
       const code = errorCodeOf(error);
       if (code === 'ENOENT') return fallback;
       throw error;
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
     }
   }
 
