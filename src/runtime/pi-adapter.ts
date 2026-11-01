@@ -276,7 +276,15 @@ export class PiAdapter {
     const models: ModelCatalogEntry[] = [];
     let defaultEntry: ModelCatalogEntry | undefined;
 
-    for (const providerId of runtime.getRegisteredProviderIds()) {
+    // `getProviders()` and not `getRegisteredProviderIds()`.
+    //
+    // The *registered* ids are the providers an extension added at runtime,
+    // and Pi's built-in providers — DeepSeek, MiniMax, OpenAI and the rest —
+    // are **not** in that list. Iterating the registered ids would therefore
+    // offer no model at all, even with a working key. The built-ins come from
+    // `getProviders()`, which is the whole catalogue.
+    for (const provider of runtime.getProviders()) {
+      const providerId = provider.id;
       if (!this.#loadedProviders.has(providerId)) continue;
       for (const model of runtime.getModels(providerId)) {
         const entry = toCatalogEntry(model, providerId);

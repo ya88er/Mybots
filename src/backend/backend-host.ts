@@ -33,6 +33,8 @@ import { SessionRegistry, type SessionAssociation } from '../runtime/session-reg
 import { ScheduleCatchUp } from '../runtime/schedule-catchup.ts';
 import { inspectSessions } from '../runtime/session-inspector.ts';
 import { ToolDispatch, type UpstreamDispatch } from '../tools/tool-dispatch.ts';
+import { isAppPath, readAppFile } from '../main/app-ui-server.ts';
+import type { GateResponse } from './backend-gate.ts';
 
 export interface BackendOptions {
   /** Where the app keeps its state (the Mini App's data dir). */
@@ -89,7 +91,7 @@ export async function startBackend(options: BackendOptions): Promise<{
   /** The dispatch ledger, for the inspector and the recovery report. */
   ledger: DispatchLedger;
   /** The app's own routes, served by the gate. */
-  routes: (path: string, method: string) => Promise<{ status: number; body: unknown } | undefined>;
+  routes: (path: string, method: string) => Promise<GateResponse | undefined>;
 }> {
   const log =
     options.log ??
@@ -255,7 +257,7 @@ export async function startBackend(options: BackendOptions): Promise<{
   const routes = async (
     path: string,
     method: string,
-  ): Promise<{ status: number; body: unknown } | undefined> => {
+  ): Promise<GateResponse | undefined> => {
     if (method === 'GET' && path === '/api/app/sessions') {
       return { status: 200, body: inspectSessions(sessions) };
     }
@@ -269,6 +271,12 @@ export async function startBackend(options: BackendOptions): Promise<{
           unsettled: ledger.unsettled().length,
         },
       };
+    }
+    // The app's own window: the provider settings and the two inspectors.
+    if (method === 'GET' && isAppPath(path)) {
+      const file = await readAppFile(path === '/app' || path === '/app/' ? '/app/index.html' : path);
+      if (file) return { status: file.status, file: { contentType: file.contentType, body: file.body } };
+      return { status: 404, body: { error: 'not_found', message: 'The page was not found.' } };
     }
     return undefined;
   };

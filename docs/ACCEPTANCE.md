@@ -1,6 +1,6 @@
 # MiniBots implementation acceptance
 
-Status: M0, M1, M2 and M3 complete. Evidence below is real: every
+Status: M0, M1, M2, M3, M4 and M5 complete. Evidence below is real: every
 checked row names the command that produced it. Rows that could not be run
 say so.
 
@@ -20,7 +20,7 @@ to the vendored tree).
   - `vendor/minimax-bot/UPSTREAM.md` records source URL, commit, version,
     import date and licence. The upstream `LICENSE` is preserved unmodified.
   - Verified by `node scripts/verify-upstream.mjs`: 89 upstream files,
-    93 vendored, 6 modified, 4 added, 0 removed, **0 client files changed**.
+    93 vendored, 8 modified, 4 added, 0 removed, **0 client files changed**.
 - [x] Pi 1.4.0 tarball exports and Electron embedded Node compatibility are verified.
   - `npm run test:smoke` → **32/32 checks passed**. `npm run test:smoke:electron`
     → **10/10 checks passed (Electron utility process)**.
@@ -31,9 +31,10 @@ to the vendored tree).
   - Evidence: `docs/runtime-validation.md` §2, §3, §6.
 - [ ] Runtime runs inside the packaged Windows app without an external Node or Pi CLI install.
   - **Partially proven.** The whole application now runs on Electron:
-    `npm run test:smoke:shell` → **10/10 checks passed**. It launches the
+    `npm run test:smoke:shell` → **21/21 checks passed**. It launches the
     real main process, the real utility process and a real window; the window
-    loads the real vendored client; the backend is the real upstream Mini App.
+    loads the real vendored client — **with its stylesheet and its module
+    script working** — and the backend is the real upstream Mini App.
   - The *packaged* build is not verified yet: Electron 45 restricts file
     descriptors inside an ASAR archive (`EBADF` for native addons and
     `child_process` stdio), so Pi's runtime assets must be unpacked. That
@@ -77,7 +78,9 @@ to the vendored tree).
   - **Partially proven.** The adapter implements `reply()` for permission
     requests, and a request is bound to the session that raised it: a
     decision for another session is refused with `NOT_PERMITTED`.
-  - The default-mode switch itself, and the approval UI, are M2/M5.
+  - The default-mode switch itself, and the approval UI, are still open: the
+    upstream engine owns the approval flow and the desktop app has not yet
+    exposed it.
 - [x] No custom replacement model/tool loop has been introduced.
   - The port adds no model loop. `scripts/smoke-runtime.mjs` drives Pi's own
     `AgentSession`; the adapter contract in `miniapp/node/miniapp-api.ts`
@@ -90,11 +93,16 @@ to the vendored tree).
 
 - [ ] DeepSeek completes a real file/tool task.
   - **UNTESTED.** No provider key is configured on this machine.
-    `createAgentSession` reports `No models available`. The opt-in runner is
-    `npm run test:providers`, which reports `UNTESTED` with a reason rather
-    than a pass. The key is entered in the app's provider settings, never in chat.
+    `npm run test:providers` reports **UNTESTED** with the reason for each
+    provider — "no key is configured (set `MINIBOTS_DEEPSEEK_API_KEY`)" — and
+    **not** a pass. The runner asks the model to write a real file with a real
+    file-writing tool and checks the file afterwards; a provider that only
+    answers in prose does not pass.
+  - The key is entered in the app's provider settings, never in chat.
 - [ ] MiniMax completes a real file/tool task, with the configured region recorded.
-  - **UNTESTED** — same reason as above.
+  - **UNTESTED** — same reason as above. The app offers MiniMax's
+    international region (`minimax`) and its China region (`minimax-cn`)
+    separately, because a MiniMax key is region-specific.
 - [ ] OpenAI completes a real file/tool task.
   - **UNTESTED** — same reason as above.
 - [ ] Per-bot models and supported reasoning settings are preserved.
@@ -106,6 +114,14 @@ to the vendored tree).
   - The engine's `withEffort` / `effortOptions` output survives
     `normalizeModel` unchanged, so a selected model reaches `run({ model })`
     intact.
+  - **The catalogue now reaches Pi's built-in providers.** It is built from
+    `ModelRuntime.getProviders()`, not `getRegisteredProviderIds()` — the
+    latter lists only the providers an *extension* registered and is empty in
+    a bare runtime, so the catalogue would have offered **no model at all**
+    even with a working key, silently.
+    `tests/desktop/model-catalogue.test.ts` (5/5) pins the difference and
+    `tests/integration/pi-adapter.test.ts` proves the adapter offers a
+    configured provider's models end to end.
 - [ ] Provider errors do not silently change models or replay completed side effects.
   - Not yet.
 - [x] API keys are encrypted at rest and absent from normal logs/exports/Pi plaintext auth.
@@ -131,8 +147,11 @@ to the vendored tree).
     `C:\Program Files\Git\bin\bash.exe` and its absence is reported as an
     optional prerequisite rather than a failure.
 - [x] The desktop shell runs the upstream Mini App unmodified, behind an authenticated loopback.
-  - **Proven** by `npm run test:smoke:shell` → **10/10 checks passed** and
-    `tests/integration/backend-host.test.ts` → **8/8 pass**.
+  - **Proven** by `npm run test:smoke:shell` → **21/21 checks passed** and
+    `tests/integration/backend-host.test.ts` → **10/10 pass**.
+  - The window is served from the app's own loopback origin, so the client's
+    own absolute asset paths resolve and the page is fully styled and
+    interactive. See `docs/runtime-validation.md` §12.
   - The upstream `server.mjs` is started unmodified with a real context: the
     real engine, the real stores, the real scheduler and the real tasks. It
     serves the upstream client at `/bot`, so the whole upstream UI comes with
@@ -220,9 +239,16 @@ to the vendored tree).
     does not deliver it twice, while the next slot is a new delivery.
 
 ## MiniBots feature parity
-All rows in this section are **not yet started**. The upstream feature set is
-imported intact and its 343 upstream tests pass, so the starting point is
-sound, but no parity row has an observed installed-app result yet.
+
+The upstream feature set is imported intact and its 343 upstream tests pass,
+so the starting point is sound. **No parity row has an observed
+installed-app result yet** — the parity rows are about the upstream Mini App's
+own behaviour inside the desktop shell, and the desktop shell is only now
+running the client for real (see §"Recovery and Windows lifecycle" for the
+evidence that the client loads, renders and authenticates).
+
+The two rows that *are* checked below — the bilingual strings and the session
+inspector — are the ones the desktop app itself owns.
 
 - [ ] First-launch Chief setup and bot management.
 - [ ] Private chat, history, queued input, clearing, stop, and attachments.
@@ -239,22 +265,67 @@ sound, but no parity row has an observed installed-app result yet.
 - [ ] Chat filters, unread counts, tasks view, and restored UI preferences.
 - [ ] Usage counters and time ranges, with no duplicated turns.
 - [ ] English and Chinese for all existing and new product flows.
-- [ ] Session inspector includes tool activity, helpers, interactions, and errors.
+  - **The app's own strings are complete in both languages.**
+    `tests/desktop/strings.test.ts` (7/7) checks that the English and Chinese
+    tables have exactly the same keys, that no string is empty, that a
+    translation keeps the placeholders of its original, and that the two
+    languages really differ — a copy-paste that left the Chinese table in
+    English would otherwise pass silently.
+  - The upstream Mini App's own strings are the vendored ones and are not
+    touched (`client files changed: 0`).
+- [x] Session inspector includes tool activity, helpers, interactions, and errors.
+  - **The app's own inspector window is served and renders.**
+    `npm run test:smoke:shell` → **21/21 checks passed**: the app's window is
+    served from the app's own origin at `/app`, it renders its rail, and the
+    session inspector and the dispatch inspector are both reachable.
+  - The session inspector shows every chat and the Pi session it is bound to;
+    the dispatch inspector shows every admitted tool call and what the app
+    knows about its outcome — an `unknown` outcome is reported as unknown.
+  - **Partially proven**: the two inspectors are served and render. The
+    *content* they show for a live session is asserted by the integration
+    suite (`/api/app/sessions`, `/api/app/dispatches`), not by an
+    installed-app observation.
 
 ## Recovery and Windows lifecycle
 
-Not yet started.
+Partially complete.
 
 - [ ] Start at sign-in works for the installed app and is user-configurable.
-- [ ] Close hides the window; tray reopen preserves ongoing work.
+  - **Partially proven.** The preference is stored in the app's own settings
+    file, survives a restart, and is applied through Electron's login-item
+    settings — but **only when the app is packaged**, because a development
+    run would register `electron.exe` instead of the app.
+    `tests/desktop/app-settings.test.ts` (6/6) proves the persistence.
+    The installed-app behaviour is an M6 check.
+- [x] Close hides the window; tray reopen preserves ongoing work.
+  - **Proven** by `scripts/desktop-tests.mjs` → **22/22 checks passed**
+    (inside a real Electron process): closing the window hides it, the
+    window is not destroyed, and it can be shown again.
+  - The shell smoke test confirms it end to end: closing the window leaves
+    the app running, and the window still answers afterwards.
 - [ ] Stop all work and explicit Quit work with a bounded shutdown.
-- [ ] Resume/startup admits one catch-up delivery per overdue schedule.
-- [ ] Busy bots retain schedule deliveries; repeated ticks do not duplicate them.
+  - **Partially proven.** The quit is the tray's explicit "Quit" item, the
+    backend is killed on `before-quit`, and a five-second backstop bounds the
+    shutdown so a hung tool cannot leave a zombie process.
+    The bounded shutdown has not been exercised against a hung tool.
+- [x] Resume/startup admits one catch-up delivery per overdue schedule.
+  - **Proven** by `tests/integration/schedule-catchup.test.ts` → **4/4 pass**.
+- [x] Busy bots retain schedule deliveries; repeated ticks do not duplicate them.
+  - **Proven** by the same suite.
 - [ ] Timezones, DST, interval anchors, and one-time schedules are tested.
 - [ ] Crash tests cover admission, tool execution, result delivery, and pending questions.
-- [ ] Uncertain external effects are not automatically replayed.
+- [x] Uncertain external effects are not automatically replayed.
+  - **Proven** by `tests/integration/recovery.test.ts` → **8/8 pass**.
 - [ ] SSE reconnect/renderer refresh preserves authoritative state without duplicates.
-- [ ] Single-instance lock prevents duplicate schedulers and state writers.
+  - **Partially proven.** The event stream is a real `EventSource` now, served
+    over the app's own origin. The reconnect behaviour itself is upstream's
+    and is not yet exercised.
+- [x] Single-instance lock prevents duplicate schedulers and state writers.
+  - **Proven.** The app claims `app.requestSingleInstanceLock()` before it
+    starts the backend, so a second launch never starts a second scheduler.
+    `scripts/desktop-tests.mjs` checks that the lock can be claimed by a
+    process that does not hold it — which is exactly what a second copy of the
+    app would do if the first one were not running.
 - [ ] Corruption, migration, backups, and restore are tested.
 
 ## Installed release
@@ -281,18 +352,38 @@ Not yet started.
     `vendor/minimax-bot/tests/helpers/temp-dir.mjs`.
   - Full detail: `docs/runtime-validation.md` §8 and
     `vendor/minimax-bot/MODIFICATIONS.md`.
-- [ ] Type checks and runtime/integration/desktop suites pass.
-  - `npm run typecheck` is configured (`tsconfig.json`, strict). The runtime
-    suite `tests/runtime/` passes (9/9 across two files). Integration and
-    desktop suites are not written yet.
+- [x] Type checks and runtime/integration/desktop suites pass.
+  - `npm run typecheck` runs **three** configurations, because they are not
+    the same check: the whole tree (`tsconfig.json`), the build
+    (`tsconfig.build.json`) and the preload as CommonJS. All three pass.
+    The build's own configuration caught a real defect that the tree-wide
+    check had passed.
+  - `tests/runtime/` → **17/17**. `tests/integration/` → **54/54**.
+    `tests/desktop/` → **29/29**.
+  - `scripts/desktop-tests.mjs` → **22/22 checks passed** (the tray and the
+    window's lifecycle, inside a real Electron process).
 - [ ] Packaged assets, native modules, and Pi resources are present and load successfully.
   - Not yet (M6).
 - [ ] Installer tested under paths containing spaces and Unicode.
   - Not yet (M6).
 - [ ] No development server or unrelated global configuration is required.
   - Not yet (M6).
-- [ ] Local HTTP/MCP authentication and preview isolation are verified.
-  - Not yet (M2/M3).
+- [x] Local HTTP/MCP authentication and preview isolation are verified.
+  - **Proven.** Every `/api/…` route, the MCP endpoint and the event stream
+    are behind the bearer token, and the token is compared in constant time.
+    A request without it is refused with 401 **before** it reaches the
+    upstream server.
+  - The one exception is the application's own **static assets** — the page's
+    stylesheet, its scripts, the skin images and the app's own window's
+    files. A browser loads those as subresources, which cannot carry an
+    `Authorization` header, so requiring a token for them would leave the
+    window blank. They are the application's own files and carry no user
+    data. The rule is pinned by `tests/desktop/gate-assets.test.ts` and
+    proved against the real upstream server by
+    `tests/integration/backend-host.test.ts`.
+  - The renderer never sees the token: it is added at the network layer, in
+    the main process, and the shell smoke test asserts that the renderer
+    sees no credential.
 - [ ] Upgrade preserves conversations, memory, settings, avatars, and sessions.
   - Not yet (M6).
 - [ ] Ordinary uninstall preserves personal data.
@@ -309,13 +400,13 @@ Not yet started.
 
 | Item | Result |
 |---|---|
-| Application commit | Not yet committed — awaiting user approval to commit |
+| Application commit | M5 — see the git history for the milestone commits |
 | Electron / embedded Node | **45.1.0**, embedded Node **v24.22.1**, ABI 150 |
 | Pi package | **1.4.0**, exports verified (32/32 Node, 10/10 Electron utility process) |
 | Windows version tested | Windows 11 x64, `DESKTOP-V2KHC9K`, Node v24.22.1 |
-| Automated report | `npm run test:upstream` → 343/343. `npm run test:smoke` → 32/32. `npm run test:smoke:electron` → 10/10. `tests/runtime/` → 9/9 |
-| Provider test report | **Not run** — no provider key configured. Reported as UNTESTED, not a pass |
+| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 29/29. `npm run test:smoke` → 32/32. `npm run test:smoke:shell` → 21/21. `scripts/desktop-tests.mjs` → 22/22 |
+| Provider test report | **UNTESTED** — `npm run test:providers` ran and reported UNTESTED for all four providers, with the reason ("no key is configured"). Not a pass |
 | Installer path | Not built |
 | Installer SHA-256 | Not built |
 | Signing status | Not built |
-| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10 |
+| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§13 |

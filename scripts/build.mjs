@@ -17,7 +17,7 @@
  * vendored subtree stays byte-identical to the pinned upstream commit.
  */
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,11 +84,28 @@ function copyRuntimeAssets() {
   }
 }
 
+/** Copy the app's own pages next to the app. */
+function copyAppUi() {
+  const source = join(root, 'src', 'app-ui');
+  const target = join(dist, 'app');
+  if (!existsSync(source)) {
+    throw new Error('The app\'s own pages were not found.');
+  }
+  mkdirSync(target, { recursive: true });
+  for (const entry of ['index.html', 'app.css', 'app.js', 'strings.js']) {
+    const from = join(source, entry);
+    if (!existsSync(from)) continue;
+    cpSync(from, join(target, entry));
+  }
+}
+
 /**
  * Compile the preload separately, as CommonJS.
  *
  * A sandboxed preload is loaded as a CommonJS script, so it cannot be part of
- * the ESM build. It is compiled on its own with `module: CommonJS`.
+ * the ESM build. It is compiled on its own with `module: CommonJS`, and the
+ * emitted file is named `preload.cjs` — which is the name the main process
+ * expects.
  */
 function compilePreload() {
   const result = spawnSync(
@@ -103,19 +120,22 @@ function compilePreload() {
       '--skipLibCheck',
       '--sourceMap',
       '--esModuleInterop',
-      join(root, 'src', 'main', 'preload.cts'),
+      '--strict',
+      join(root, 'src', 'main', 'preload.ts'),
     ],
     { cwd: root, stdio: 'inherit' },
   );
   if (result.status !== 0) {
     throw new Error('The preload build failed.');
   }
-  // TypeScript emits `preload.cjs` for a `.cts` source in CommonJS mode; the
-  // name the main process expects is `preload.cjs` either way.
-  const emitted = join(dist, 'main', 'preload.cjs');
+  // TypeScript emits `preload.js` for a `.ts` source in CommonJS mode; the
+  // name the main process expects is `preload.cjs`.
+  const emitted = join(dist, 'main', 'preload.js');
+  const renamed = join(dist, 'main', 'preload.cjs');
   if (!existsSync(emitted)) {
     throw new Error('The preload was not emitted.');
   }
+  renameSync(emitted, renamed);
 }
 
 /** Remove the previous build. */
@@ -128,6 +148,7 @@ clean();
 compile();
 compilePreload();
 copyClient();
+copyAppUi();
 copyMiniApp();
 copyRuntimeAssets();
 

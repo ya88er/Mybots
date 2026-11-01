@@ -19,6 +19,6 @@
     "release",
     "vendor/minimax-bot",
     "tests",
-    "src/main/preload.cts"
+    "src/main/preload.ts"
   ]
 }

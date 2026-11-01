@@ -193,6 +193,42 @@ test('an app route still needs the token', async (t) => {
   assert.equal(response.status, 401, 'the app route is behind the token too');
 });
 
+test('the page\'s own assets are public, and nothing else is', async (t) => {
+  const h = await backendFixture(t);
+
+  // The window is served from the app's origin, so the browser asks for the
+  // page's stylesheet and its scripts as subresources. A subresource request
+  // cannot carry an `Authorization` header, so these are the one exception
+  // to the gate's rule — and the exception must stay that narrow.
+  for (const path of ['/bot', '/bot/app.css', '/bot/app.js']) {
+    const response = await fetch(`http://127.0.0.1:${h.gate.port}${path}`);
+    assert.equal(response.status, 200, `${path} is a public asset`);
+  }
+
+  // Everything that can carry the user's data stays behind the token.
+  for (const path of [
+    '/api/state',
+    '/api/bots',
+    '/api/models',
+    '/api/app/sessions',
+    '/api/app/dispatches',
+    '/mcp/minimax-bot',
+  ]) {
+    const response = await fetch(`http://127.0.0.1:${h.gate.port}${path}`);
+    assert.equal(response.status, 401, `${path} needs the token`);
+  }
+});
+
+test('a public asset is refused when the method is not a GET', async (t) => {
+  const h = await backendFixture(t);
+
+  // Only a read is public. A write to the same path must not be.
+  const response = await fetch(`http://127.0.0.1:${h.gate.port}/bot/app.js`, {
+    method: 'POST',
+  });
+  assert.equal(response.status, 401, 'only GET is public');
+});
+
 test('the backend shuts down cleanly and releases its port', async (t) => {
   const h = await backendFixture(t);
   const { port } = h.backend.ready;

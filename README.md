@@ -12,25 +12,37 @@ It is built on the [Pi coding-agent SDK][pi]: Pi owns the model conversation,
 the tool loop, context compaction, retries, Skills, and MCP. MiniBots owns the
 collaboration layer. **No replacement model or tool loop is implemented here.**
 
-> **Status:** in development. Milestones M0 (import and baseline) and the
-> runtime half of M1 are complete; see [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)
-> for the honest per-item state and [`docs/runtime-validation.md`](docs/runtime-validation.md)
-> for the verified environment facts.
+> **Status:** in development. Milestones M0–M5 are complete; see
+> [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the honest per-item state and
+> [`docs/runtime-validation.md`](docs/runtime-validation.md) for the verified
+> environment facts. The installer is M6.
 
 ---
 
 ## What works today
 
 - The complete upstream MiniBots engine and UI are imported and running
-  (**343/343 upstream tests pass** on Windows).
-- The Pi 1.4.0 SDK is verified to load and work inside the Electron utility
+  (**343/343 upstream tests pass** on Windows), and the desktop shell serves
+  the real client — styled, interactive, and authenticated.
+- The Pi 1.4.0 SDK drives the real model loop inside the Electron utility
   process that hosts the backend (**32/32** Node checks, **10/10** Electron
   checks).
-- The model-catalogue contract between the engine, the settings UI, and the
-  agent runtime is pinned by tests.
+- Provider keys are stored encrypted with the operating system's key store,
+  and never leave the main process.
+- A durable dispatch ledger, a durable session index, and a schedule catch-up
+  record survive a restart.
+- A tray icon, a window that hides instead of closing, and a start-at-sign-in
+  preference.
 
-The desktop shell, the Pi adapter, credential storage, and the installer are
-still to come.
+## What is not done yet
+
+- **The live provider rows are UNTESTED.** No provider key is configured on
+  the build machine, so `npm run test:providers` reports `UNTESTED` with a
+  reason. It is not a pass. The key is entered in the app's provider
+  settings, never in chat.
+- **The installer is not built.** The packaged-build checks — Pi's runtime
+  assets under Electron's ASAR restrictions, the installer under a path with
+  spaces and Unicode, the installed app's start-at-sign-in entry — are M6.
 
 ---
 
@@ -52,13 +64,35 @@ installation.
 
 ```bash
 npm ci                 # install the pinned dependency graph
-npm run test:upstream  # run the imported upstream suite
-npm run test:smoke     # verify the Pi SDK surface on Node
-npm run test:smoke:electron  # verify it inside the Electron utility process
-npm run typecheck      # type-check the new TypeScript
+npm run build          # compile the app into dist/
+npm run dev            # launch the desktop shell
 ```
 
-`npm run dev` launches the desktop shell once the Electron shell lands.
+## Testing
+
+```bash
+npm run typecheck          # three configurations: the tree, the build, the preload
+npm run test:runtime       # the pure runtime units
+npm run test:integration   # the real backend, the real upstream server, the real Pi loop
+npm run test:desktop       # the desktop's own units
+npm run test:upstream      # the imported upstream suite
+npm run test:smoke         # the Pi SDK surface on Node
+npm run test:smoke:electron  # the Pi SDK surface in the Electron utility process
+npm run test:smoke:shell   # the whole desktop shell, end to end
+npm run test:providers     # the opt-in live provider check
+```
+
+`npm run test:providers` is **not** part of `npm test`: it costs money and
+needs a key. It reports `UNTESTED` with a reason when no key is configured,
+and it never reports an untested provider as a pass.
+
+The Electron tests write their report to a file, because Electron on Windows
+does not write to the console of a GUI application:
+
+| Report | Written by |
+|---|---|
+| `shell-smoke-report.txt` | `npm run test:smoke:shell` |
+| `desktop-tests-report.txt` | `scripts/desktop-tests.mjs` |
 
 ---
 
@@ -71,6 +105,11 @@ vendor/minimax-bot/      the imported upstream Mini App (MIT, attributed)
   miniapp/node/miniapp-api.ts   the agent contract the Pi adapter implements
   tests/                 the imported upstream suite
 src/                     the new desktop, backend and runtime code
+  main/                  the Electron main process, the preload, the tray, the keys
+  backend/               the utility process, the authenticated loopback, the app's routes
+  runtime/               the Pi adapter, the session index, the dispatch ledger
+  tools/                 the MiniBots business tools as Pi custom tools
+  app-ui/                the app's own window: provider settings and the inspectors
 tests/                   new tests for the port
 scripts/                 build, verify and smoke-test tooling
 docs/                    plan, acceptance report, runtime validation

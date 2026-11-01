@@ -431,6 +431,59 @@ test('the provider catalogue lists only configured providers', async (t) => {
   assert.equal(catalog.default, undefined);
 });
 
+test('a configured built-in provider is offered', async (t) => {
+  // The catalogue must reach Pi's **built-in** providers — DeepSeek,
+  // MiniMax, OpenAI — and not only the ones an extension registered.
+  //
+  // The two lists are different: `getRegisteredProviderIds()` is empty in a
+  // bare runtime, while `getProviders()` holds the whole catalogue. A
+  // catalogue built from the registered ids would offer nothing at all, and
+  // the failure would be silent.
+  const workspace = await mkdtemp(join(tmpdir(), 'minibots-catalogue-'));
+  const adapter = new PiAdapter({
+    agentDir: workspace,
+    sessionDir: workspace,
+    sessions: new SessionRegistry(),
+    // The user's own key, as the settings page supplies it.
+    credential: (providerId) =>
+      providerId === 'deepseek' ? 'sk-not-a-real-key' : undefined,
+  });
+
+  t.after(async () => {
+    await adapter.dispose();
+    await rm(workspace, { recursive: true, force: true }).catch(() => {});
+  });
+
+  // The catalogue is empty until a provider has been configured.
+  assert.equal((await adapter.models()).models.length, 0);
+
+  // A run names the provider, which is what configures it in the real app.
+  const catalog = await (async () => {
+    // The adapter's own credential path is what the settings page uses; the
+    // provider becomes configured when a turn names it.
+    await adapter
+      .run(
+        {
+          text: 'Hello.',
+          model: { providerId: 'deepseek', modelId: 'deepseek-v4-pro' },
+        },
+        { botId: 'bot_test', chatId: 'bot:bot_test', onEvent: () => {} },
+      )
+      .catch(() => undefined);
+    return adapter.models();
+  })();
+
+  assert.ok(
+    catalog.models.length > 0,
+    'the configured provider\'s models are offered',
+  );
+  assert.ok(
+    catalog.models.every((entry) => entry.providerId === 'deepseek'),
+    'only the configured provider is offered',
+  );
+  assert.ok(catalog.default, 'there is a default model');
+});
+
 test('a MiniBots business tool runs through Pi\'s real tool loop', async (t) => {
   // The tool is registered the way the backend registers it: as a Pi custom
   // tool whose closure carries the session's identity.

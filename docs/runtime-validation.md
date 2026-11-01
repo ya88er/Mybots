@@ -471,7 +471,153 @@ cannot be decrypted is *reported* rather than silently ignored.
 
 ---
 
-## 12. What is still unverified
+## 12. The desktop shell — M5 findings
+
+### The window could not be served from the file system
+
+The upstream client's own page refers to its assets by **absolute** path:
+
+```html
+<link rel="stylesheet" href="/bot/app.css" />
+<script type="module" src="/bot/app.js"></script>
+```
+
+A page loaded from the file system resolves `/bot/app.css` against the file
+system root, not against a server. The page therefore loads **unstyled, and
+its module script never runs**.
+
+This was measured, not assumed. `scripts/probe-client-origin.mjs` loaded the
+vendored client from `file://` and reported:
+
+| Probe | Result |
+|---|---|
+| `getComputedStyle(document.body).backgroundColor` | `rgba(0, 0, 0, 0)` — the stylesheet did not load |
+| the side list's children | `0` — the module script never ran |
+| the side list's text | `正在加载团队…` — the static placeholder from `index.html` |
+
+The app's UI was, in that state, entirely non-functional.
+
+**The fix:** the window is served from the app's own **loopback origin** —
+`http://127.0.0.1:<gate port>/bot` — which is the upstream server's own
+address, reached through the authenticated gate. The absolute paths resolve
+normally, the page has a real origin, and the event stream is a real
+`EventSource`. The upstream client is still the upstream client: it is served
+by the upstream server from `miniapp/client`, and the frontend was not
+rewritten.
+
+### A preload cannot patch the page's `fetch` under context isolation
+
+The first attempt bridged the page's `fetch` and `EventSource` from the
+preload. That does not work: with `contextIsolation: true` the preload runs
+in its **own world**, and its `window` is not the page's `window`. The page's
+`fetch` was therefore untouched, and the page's own request reached the gate
+without a token and was refused with 401.
+
+The measured proof is in the smoke test's own report — the page's relative
+fetch returned `{"error":"unauthorized","message":"A valid bearer token is
+required."}` while the stylesheet and the script loaded correctly.
+
+**The fix:** the token is added at the **network layer**, in the main process:
+
+```ts
+session.defaultSession.webRequest.onBeforeSendHeaders(
+  { urls: ['http://127.0.0.1/*'] },
+  (details, callback) => { /* add Authorization */ },
+);
+```
+
+Chromium's `webRequest` sees every request the renderer makes, including a
+subresource load and an event stream, and a request to the app's own port
+only. The token therefore never reaches the page, and the page does not have
+to know it exists. The preload keeps only the operations that are not HTTP:
+the provider keys, the app's own information, and the app's own window.
+
+This is strictly better than the page-side bridge: it covers the page's
+assets, its API calls *and* its event stream with one mechanism, and it
+cannot be bypassed by a page that decides to use `XMLHttpRequest` instead.
+
+### The gate must let the page's own assets through — and nothing else
+
+The gate refuses every request without the bearer token. A browser loads a
+page's stylesheet, its scripts and its images as **subresources**, and a
+subresource request cannot carry an `Authorization` header. The gate
+therefore has one narrow exception, for the application's own files:
+
+- `/bot`, `/bot/app.css`, `/bot/app.js`, `/bot/skins/*.png`;
+- `/app`, `/app/app.css`, `/app/app.js`, `/app/strings.js`.
+
+Everything that can carry the user's data — every `/api/…` route, the MCP
+endpoint, the event stream and the app's own routes — is still behind the
+token, and the token check happens **before** the routes are consulted, so a
+route can never be reached without one. Only `GET` is public; a `POST` to the
+same path is refused.
+
+`tests/desktop/gate-assets.test.ts` pins the rule, and
+`tests/integration/backend-host.test.ts` proves it against the real upstream
+server: the assets answer `200` without a token, and every API route answers
+`401`.
+
+**One regression was introduced and caught here.** The first implementation of
+the public-asset rule consulted the app's routes *before* the token check, so
+`/api/app/sessions` was answered with `200` and no token. The integration
+suite's existing test — "an app route still needs the token" — caught it
+immediately. The rule is now: **token first, then routes**, with only the
+static-asset paths bypassing the check.
+
+### The window hides; it does not close
+
+The app keeps working when the window is closed: a schedule that comes due at
+09:00 has to be delivered whether or not anyone is looking. Closing the
+window therefore hides it, and the tray is how the user brings it back. The
+tray's menu has exactly three items — open, start at sign-in, quit — and the
+quit is always the user's explicit choice.
+
+`scripts/desktop-tests.mjs` → **22/22 checks passed** — proves the rules inside a real Electron process:
+the window hides on close and is not destroyed, it can be shown again, the
+tray has exactly three actions, the sign-in item is a checkbox that reports
+the new state, and the single-instance lock admits exactly one holder.
+
+### The start-at-sign-in preference is remembered even when it cannot be applied
+
+Electron's login-item settings only work for a **packaged, installed**
+application. A development run would register the path to `electron.exe`
+itself, which would start the wrong thing at sign-in. The preference is
+therefore stored in the app's own settings either way, and applied only when
+`app.isPackaged` is true.
+
+### The type checker now runs the build's own configuration
+
+`scripts/check-types.mjs` checks three configurations, because they are not
+the same check: the whole tree (`tsconfig.json`), the build
+(`tsconfig.build.json`), and the preload as CommonJS. The build's own
+configuration caught a real defect — a header value's type is checked
+differently there — that the tree-wide check had passed.
+
+The preload was also rewritten from a `.cts` file with JSDoc annotations to
+a plain `.ts` file. A sandboxed preload is loaded as CommonJS, so it is
+compiled on its own and emitted as `preload.cjs`; writing it in TypeScript
+means the same checker covers it.
+
+### M5 verification
+
+| Suite | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | 3/3 configurations pass |
+| Runtime | `npm run test:runtime` | 17/17 |
+| Desktop | `npm run test:desktop` | 24/24 |
+| Integration | `npm run test:integration` | 51/51 |
+| Upstream | `npm run test:upstream` | 343/343 |
+| Shell | `npm run test:smoke:shell` | **21/21 checks passed** |
+
+The shell smoke test now proves the origin fix end to end: the page is served
+from `http://127.0.0.1:<port>/bot`, the client's stylesheet loaded
+(`body background: rgb(20, 20, 20)`), the client's module script ran, the
+page's own relative `fetch` is authenticated, the app's own window renders,
+and closing the window hides it instead of quitting.
+
+---
+
+## 13. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|
@@ -479,3 +625,5 @@ cannot be decrypted is *reported* rather than silently ignored.
 | MCP server call, failure, reconnect | not yet exercised | needs the tool dispatch layer (M3) |
 | Packaged build loading Pi's runtime assets | not yet exercised | M6 |
 | Native process-tree cancellation | not yet exercised | needs the tool dispatch layer (M3) |
+| The packaged app's start-at-sign-in entry | not yet exercised | needs the installed build (M6) |
+| The installed app's tray icon | not yet exercised | needs the installed build (M6) |

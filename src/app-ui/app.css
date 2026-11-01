@@ -1,0 +1,340 @@
+/*
+ * The app's own window.
+ *
+ * It is deliberately plain: a rail of sections on the left, the section's
+ * content on the right. The chat UI belongs to the upstream Mini App; this
+ * window is only for the things the desktop app owns — the provider keys, the
+ * session inspector and the dispatch inspector.
+ *
+ * The palette is the upstream client's own, so the two windows read as one
+ * application.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #101014;
+  --bg-raised: #17171d;
+  --bg-sunken: #0b0b0e;
+  --line: #26262e;
+  --text: #e9e9ee;
+  --text-muted: #9a9aa8;
+  --accent: #6f7bff;
+  --accent-soft: rgba(111, 123, 255, 0.14);
+  --good: #3fbf7f;
+  --warn: #e3b341;
+  --bad: #e5534b;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 208px 1fr;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------- rail */
+
+.rail {
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.rail h1 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 18px 8px;
+  letter-spacing: 0.2px;
+}
+
+.rail button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.rail button:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.rail button[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- main */
+
+.main {
+  overflow-y: auto;
+  padding: 28px 32px 48px;
+}
+
+.main header {
+  margin-bottom: 22px;
+}
+
+.main h2 {
+  font-size: 20px;
+  font-weight: 650;
+  margin: 0 0 6px;
+}
+
+.main header p {
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 62ch;
+}
+
+.loading {
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.card-head h3 {
+  font-size: 15px;
+  font-weight: 620;
+  margin: 0;
+  flex: 1;
+}
+
+.card p.hint {
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+/* ---------------------------------------------------------------- chips */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.chip.good {
+  color: var(--good);
+  border-color: rgba(63, 191, 127, 0.4);
+}
+
+.chip.bad {
+  color: var(--bad);
+  border-color: rgba(229, 83, 75, 0.4);
+}
+
+.chip.warn {
+  color: var(--warn);
+  border-color: rgba(227, 179, 65, 0.4);
+}
+
+/* ---------------------------------------------------------------- forms */
+
+label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+input[type="text"],
+input[type="password"],
+select {
+  width: 100%;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  padding: 9px 11px;
+  outline: none;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+.key-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  padding: 9px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn.danger:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0 10px 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+td {
+  padding: 10px 10px 10px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+td code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.empty {
+  color: var(--text-muted);
+  padding: 18px 0;
+}
+
+/* ---------------------------------------------------------------- toast */
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+
+.toast.bad {
+  border-color: rgba(229, 83, 75, 0.5);
+  color: var(--bad);
+}
+
+/* ---------------------------------------------------------------- misc */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px 16px;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--text-muted);
+}
+
+.kv dd {
+  margin: 0;
+  word-break: break-all;
+}

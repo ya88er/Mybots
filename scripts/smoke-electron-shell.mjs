@@ -1,12 +1,19 @@
-// Electron entry point for the M2 shell smoke test.
+// Electron entry point for the M5 shell smoke test.
 //
 // It launches the real application: the main process, the utility process and
-// the window. The window loads the real vendored client, and the backend is
-// the real upstream Mini App.
+// the window. The window loads the real vendored client from the app's own
+// loopback origin, and the backend is the real upstream Mini App.
 //
-// The check is that the shell works end to end: the window appears, the
-// backend answers through the gate, and the renderer can reach the backend
-// through the main process without ever seeing the bearer token.
+// The checks are that the shell works end to end:
+//
+// - the window appears and loads the real client **with its stylesheet and
+//   its module script** — a `file://` page resolves neither of them, so this
+//   is the check that the origin fix actually took;
+// - the backend answers through the gate;
+// - the renderer can reach the backend through the main process without ever
+//   seeing the bearer token;
+// - the app's own window serves the provider settings and the inspectors;
+// - the tray exists and the window hides rather than closing.
 //
 // Electron on Windows does not write to the console of a GUI application, so
 // the report goes to a file and the process exits with a status code.
@@ -14,10 +21,10 @@
 // Run:  npx electron scripts/smoke-electron-shell.mjs
 import { app, BrowserWindow } from 'electron';
 import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = resolve(fileURLToPath(import.meta.url), '..');
+const here = dirname(fileURLToPath(import.meta.url));
 const reportPath = resolve(here, '..', 'shell-smoke-report.txt');
 
 /** The checks that passed. */
@@ -53,98 +60,225 @@ async function until(predicate, timeoutMs = 30_000) {
 
 writeFileSync(reportPath, 'MiniBots shell smoke test\n\n', 'utf8');
 
-// The whole run lives inside `whenReady`, because Electron's readiness is a
-// promise that a top-level `await` in an ESM entry does not sequence
-// reliably against the app's own start-up.
 app.whenReady().then(async () => {
   try {
     // The main process's own module starts the backend and the window when it
     // is imported. It is imported here so that the smoke test drives the
     // same code path the application does.
-    //
-    // `app.getAppPath()` is the directory of the script Electron was launched
-    // with, which is `scripts/`; the app's root is its parent.
     const projectRoot = resolve(here, '..');
-    const entry = joinPath(projectRoot, 'dist', 'main', 'main.js');
+    const entry = resolve(projectRoot, 'dist', 'main', 'main.js');
     await import(`file://${entry.replace(/\\/g, '/')}`);
 
-  // The window appears.
-  const windowAppeared = await until(() => BrowserWindow.getAllWindows().length > 0);
-  check('a window is created', windowAppeared);
+    // The window appears.
+    const windowAppeared = await until(() => BrowserWindow.getAllWindows().length > 0);
+    check('a window is created', windowAppeared);
 
-  const window = BrowserWindow.getAllWindows()[0];
-  if (!window) throw new Error('no window');
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) throw new Error('no window');
 
-  // The window loads the real client.
-  const loaded = await until(
-    () => !window.webContents.isLoading() && window.webContents.getURL().length > 0,
-  );
-  check('the window loads a page', loaded, window.webContents.getURL());
+    // The window loads the real client, over the app's own origin.
+    const loaded = await until(
+      () =>
+        !window.webContents.isLoading() &&
+        window.webContents.getURL().startsWith('http://127.0.0.1:'),
+    );
+    check('the window loads a page', loaded, window.webContents.getURL());
+    check(
+      'the page is served from the app\'s own loopback origin',
+      window.webContents.getURL().startsWith('http://127.0.0.1:'),
+      window.webContents.getURL(),
+    );
 
-  // The preload bridge is installed.
-  const bridgePresent = await window.webContents.executeJavaScript(
-    'typeof window.minibots === "object" && window.minibots !== null',
-  );
-  check('the preload bridge is exposed to the renderer', bridgePresent === true);
+    // The preload bridge is installed.
+    const bridgePresent = await window.webContents.executeJavaScript(
+      'typeof window.minibots === "object" && window.minibots !== null',
+    );
+    check('the preload bridge is exposed to the renderer', bridgePresent === true);
 
-  // The renderer cannot reach the backend's token.
-  const bridgeShape = String(
-    await window.webContents.executeJavaScript('JSON.stringify(window.minibots ?? {})'),
-  );
-  check(
-    'the bridge exposes no bearer token',
-    !bridgeShape.includes('Bearer') && !bridgeShape.includes('sk-'),
-    'the renderer sees no credential',
-  );
+    // The renderer cannot reach the backend's token.
+    const bridgeShape = String(
+      await window.webContents.executeJavaScript('JSON.stringify(window.minibots ?? {})'),
+    );
+    check(
+      'the bridge exposes no bearer token',
+      !bridgeShape.includes('Bearer') && !bridgeShape.includes('sk-'),
+      'the renderer sees no credential',
+    );
 
-  // The backend answers 503 until it is up, so the test waits for the first
-  // real answer rather than racing the start-up.
-  const backendUp = await until(async () => {
+    // The backend answers 503 until it is up, so the test waits for the first
+    // real answer rather than racing the start-up.
+    const backendUp = await until(async () => {
+      const state = await window.webContents.executeJavaScript(
+        'window.minibots.request({ path: "/api/state" })',
+      );
+      return state?.status === 200;
+    }, 30_000);
+    check('the backend becomes ready', backendUp);
+
+    // The backend answers through the main process.
     const state = await window.webContents.executeJavaScript(
       'window.minibots.request({ path: "/api/state" })',
     );
-    return state?.status === 200;
-  }, 30_000);
-  check('the backend becomes ready', backendUp);
+    const body = state?.body;
+    check(
+      'the renderer reaches the backend through the main process',
+      Array.isArray(body?.bots),
+      `bots: ${Array.isArray(body?.bots) ? body.bots.length : 'n/a'}`,
+    );
+    check('the agent is wired into the engine', body?.agentAvailable === true);
 
-  // The backend answers through the main process.
-  const state = await window.webContents.executeJavaScript(
-    'window.minibots.request({ path: "/api/state" })',
-  );
-  const body = state?.body;
-  check(
-    'the renderer reaches the backend through the main process',
-    Array.isArray(body?.bots),
-    `bots: ${Array.isArray(body?.bots) ? body.bots.length : 'n/a'}`,
-  );
-  check('the agent is wired into the engine', body?.agentAvailable === true);
+    // ---------------------------------------------------------------------
+    // The client actually renders.
+    //
+    // The upstream page refers to its own assets by absolute path. A page
+    // loaded from the file system cannot resolve them, and the page then
+    // loads unstyled with its module script never running. These two checks
+    // are what prove the origin fix works.
+    // ---------------------------------------------------------------------
+    const rendered = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(`
+        (() => {
+          const side = document.getElementById('side-list');
+          return JSON.stringify({
+            // The stylesheet applied: the upstream page paints a dark body.
+            background: getComputedStyle(document.body).backgroundColor,
+            // The module script ran: the side list was populated.
+            children: side ? side.children.length : 0,
+            text: side ? side.textContent.trim().slice(0, 40) : '',
+          });
+        })()
+      `);
+      const state = JSON.parse(probe);
+      return state.children > 0 && state.background !== 'rgba(0, 0, 0, 0)';
+    }, 30_000);
 
-  // The model catalogue route works through the same path.
-  const models = await window.webContents.executeJavaScript(
-    'window.minibots.request({ path: "/api/models" })',
-  );
-  check(
-    'the model catalogue is served',
-    models?.body?.supported === true,
-    'the Host lets a run pick its model',
-  );
+    const renderState = JSON.parse(
+      String(
+        await window.webContents.executeJavaScript(`
+          (() => {
+            const side = document.getElementById('side-list');
+            return JSON.stringify({
+              background: getComputedStyle(document.body).backgroundColor,
+              children: side ? side.children.length : 0,
+              text: side ? side.textContent.trim().slice(0, 40) : '',
+            });
+          })()
+        `),
+      ),
+    );
+    check(
+      'the client\'s stylesheet loaded',
+      renderState.background !== 'rgba(0, 0, 0, 0)',
+      `body background: ${renderState.background}`,
+    );
+    check(
+      'the client\'s module script ran',
+      renderState.children > 0,
+      `side list entries: ${renderState.children}`,
+    );
 
-  // The session inspector route works.
-  const sessions = await window.webContents.executeJavaScript(
-    'window.minibots.request({ path: "/api/app/sessions" })',
-  );
-  check(
-    'the session inspector is served',
-    typeof sessions?.body?.count === 'number',
-    `sessions: ${sessions?.body?.count ?? 'n/a'}`,
-  );
+    // The page's own relative fetch works — that is the bridge's job.
+    const fetched = await window.webContents.executeJavaScript(
+      'fetch("/api/state").then((r) => r.text()).then((text) => text.slice(0, 300)).catch((e) => "ERROR " + String(e))',
+    );
+    const fetchedText = String(fetched);
+    check(
+      'the page can fetch the API with a relative path',
+      fetchedText.includes('"bots"'),
+      fetchedText.slice(0, 160),
+    );
 
-  // The gate refuses a request without the token. The renderer has no way to
-  // reach the backend's own port, so this is the app's only way in.
-  const gatePort = await window.webContents.executeJavaScript(
-    'window.minibots.request({ path: "/api/app/sessions" }).then(() => "via-bridge")',
-  );
-  check('the bridge is the only way in', gatePort === 'via-bridge');
+    // ---------------------------------------------------------------------
+    // The app's own window.
+    // ---------------------------------------------------------------------
+    await window.webContents.executeJavaScript('window.minibots.openAppWindow()');
+    const appWindowAppeared = await until(
+      () =>
+        BrowserWindow.getAllWindows().some(
+          (candidate) => candidate.webContents.getURL().endsWith('/app'),
+        ),
+    );
+    check("the app's own window opens", appWindowAppeared);
+
+    // The app's window is found by its URL, not by its position: the chat
+    // window is the first one, and its position is not the app's business.
+    const appWindow = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.webContents.getURL().endsWith('/app'),
+    );
+    if (appWindow) {
+      await until(() => !appWindow.webContents.isLoading() && appWindow.webContents.getURL().length > 0);
+      check(
+        "the app's own window is served from the app's origin",
+        appWindow.webContents.getURL().startsWith('http://127.0.0.1:') &&
+          appWindow.webContents.getURL().endsWith('/app'),
+        appWindow.webContents.getURL(),
+      );
+
+      const appRendered = await until(async () => {
+        const probe = await appWindow.webContents.executeJavaScript(
+          'Boolean(document.querySelector(".rail button"))',
+        );
+        return probe === true;
+      }, 20_000);
+      check("the app's own window rendered its rail", appRendered);
+
+      // The provider list is the app's own, and the key never comes back.
+      const providers = await appWindow.webContents.executeJavaScript(
+        'window.minibots.listProviders().then((r) => r.providers.length)',
+      );
+      check('the app offers its providers', providers === 4, `providers: ${providers}`);
+
+      const credentials = await appWindow.webContents.executeJavaScript(
+        'window.minibots.listCredentials().then((r) => JSON.stringify(r))',
+      );
+      check(
+        'the credential list carries no key',
+        !String(credentials).includes('sk-'),
+        String(credentials),
+      );
+    }
+
+    // ---------------------------------------------------------------------
+    // The tray and the window lifecycle.
+    // ---------------------------------------------------------------------
+    // Electron does not expose the tray list, so the tray is observed through
+    // its effect: the app must not quit when the window is closed, and the
+    // quit path must be the tray's own.
+    window.close();
+    await new Promise((r) => setTimeout(r, 800));
+    check('closing the window hides it instead of quitting', window.isVisible() === false);
+    check('the window still exists after a close', window.isDestroyed() === false);
+
+    // The session inspector route works.
+    const sessions = await window.webContents.executeJavaScript(
+      'window.minibots.request({ path: "/api/app/sessions" })',
+    );
+    check(
+      'the session inspector is served',
+      typeof sessions?.body?.count === 'number',
+      `sessions: ${sessions?.body?.count ?? 'n/a'}`,
+    );
+
+    // The dispatch inspector route works.
+    const dispatches = await window.webContents.executeJavaScript(
+      'window.minibots.request({ path: "/api/app/dispatches" })',
+    );
+    check(
+      'the dispatch inspector is served',
+      Array.isArray(dispatches?.body?.records),
+      `records: ${dispatches?.body?.records?.length ?? 'n/a'}`,
+    );
+
+    // The app's own pages are served.
+    const appPage = await window.webContents.executeJavaScript(
+      'window.minibots.request({ path: "/app/index.html" })',
+    );
+    check(
+      "the app's own page is served",
+      appPage?.status === 200 &&
+        String(typeof appPage.body === 'string' ? appPage.body : '').includes('<!doctype html>'),
+      `status: ${appPage?.status}`,
+    );
   } catch (error) {
     failed.push('the shell smoke test');
     say(`FAIL  the shell smoke test — ${error?.stack ?? error}`);
@@ -153,8 +287,3 @@ app.whenReady().then(async () => {
     app.exit(failed.length === 0 ? 0 : 1);
   }
 });
-
-/** Join path segments with the platform's separator. */
-function joinPath(...segments) {
-  return segments.join(/[\\/]/.test(segments[0]) && segments[0].includes('\\') ? '\\' : '/');
-}

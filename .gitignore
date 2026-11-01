@@ -38,7 +38,11 @@ desktop.ini
 # double quotes in `git commit -m`)
 .git-commit-*.txt
 
-# Scratch output from the Electron shell smoke test (Electron on Windows does
-# not write to the console, so the report goes to a file)
+# Scratch output from the Electron smoke tests (Electron on Windows does not
+# write to the console, so the report goes to a file)
 shell-smoke-report.txt
+desktop-tests-report.txt
+client-origin-probe.txt
+dev-launch.log
+dev-launch.err
 .tmp-*
