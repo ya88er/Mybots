@@ -11,8 +11,46 @@
  * `miniapp-api.ts`, so the build's `rootDir` never has to reach into the
  * vendored subtree. The shape is the upstream one, copied from
  * `miniapp/node/miniapp-api.ts`.
+ *
+ * The upstream server is loaded **dynamically, from the path the host
+ * resolves**, not by a static import. A static import would be relative to
+ * this file's own location, and that location is not the same in every
+ * layout: in a development run the vendored tree is at the repository's root,
+ * while in a packaged build it is inside the archive at `dist/vendor`. The
+ * host already resolves the right place for it — that is the same place it
+ * passes to the Mini App as `pluginRoot` — so the loader is told where to
+ * look.
  */
-import { start as startUpstream } from '../../vendor/minimax-bot/miniapp/node/server.mjs';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+
+/**
+ * The upstream server's `start(context)`.
+ *
+ * It is resolved on the first call and kept: the Mini App is started once per
+ * backend, and the module is cached by Node anyway.
+ */
+let startUpstream: ((context: unknown) => Promise<unknown>) | undefined;
+
+/**
+ * Load the upstream server from the Mini App's root.
+ *
+ * The path is turned into a `file://` URL, because that is what a dynamic
+ * import needs — and a URL is also what lets the loader reach **inside an
+ * archive**, where the vendored tree lives in a packaged build.
+ */
+async function loadUpstream(pluginRoot: string): Promise<(context: unknown) => Promise<unknown>> {
+  if (startUpstream) return startUpstream;
+  const entry = join(pluginRoot, 'miniapp', 'node', 'server.mjs');
+  const module = (await import(pathToFileURL(entry).href)) as {
+    start?: (context: unknown) => Promise<unknown>;
+  };
+  if (typeof module.start !== 'function') {
+    throw new Error('The MiniBots Mini App did not export a start function.');
+  }
+  startUpstream = module.start;
+  return startUpstream;
+}
 
 /** The agent client the upstream engine consumes. */
 export interface MiniAppAgentClient {
@@ -110,6 +148,11 @@ export interface MiniAppToolDispatch {
  *
  * The upstream server binds the address the context names and returns a
  * lifecycle that stops it.
+ *
+ * The Mini App's root is taken from the context, because that is where the
+ * host has already resolved it.
  */
-export const start = async (context: MiniAppContext): Promise<MiniAppLifecycle> =>
-  (await startUpstream(context as never)) as MiniAppLifecycle;
+export const start = async (context: MiniAppContext): Promise<MiniAppLifecycle> => {
+  const start_ = await loadUpstream(context.pluginRoot);
+  return (await start_(context as never)) as MiniAppLifecycle;
+};

@@ -14,19 +14,31 @@
  * makes the loopback safe on a machine where any process can reach
  * `127.0.0.1`.
  */
-import { app, BrowserWindow, ipcMain, safeStorage, session, shell, utilityProcess } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, safeStorage, session, shell, utilityProcess } from 'electron';
 import { randomBytes } from 'node:crypto';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CredentialService } from './credential-service.ts';
 import { SettingsStore } from './app-settings.ts';
 import { PROVIDERS } from './providers.ts';
-import { agentDir, appRoot, credentialPath, dataDir, sessionDir, settingsPath } from './paths.ts';
+import { log, trace, traceError, useLogDirectory } from './app-log.ts';
+import {
+  agentDir,
+  appRoot,
+  credentialPath,
+  dataDir,
+  resourcesPath,
+  sessionDir,
+  settingsPath,
+  userDataDir,
+} from './paths.ts';
 import {
   allowClose,
   createTray,
   installWindowLifecycle,
+  trayIconPath,
   type TrayController,
   type WindowController,
 } from './window-lifecycle.ts';
@@ -66,6 +78,68 @@ export function isReady(): boolean {
 }
 
 /**
+ * The backend's entry point.
+ *
+ * The backend is a **utility process**: a separate Node process that Electron
+ * forks. A forked process needs a real file to run, so in a packaged build a
+ * tiny **shim** is unpacked from the archive and forked; the shim hands over
+ * to the real entry point, which stays in the archive.
+ *
+ * The shim is therefore the file that is forked, and its location is the
+ * unpacked tree.
+ */
+function backendEntry(): string {
+  const resources = resourcesPath();
+  if (resources) {
+    const unpacked = join(resources, 'app.asar.unpacked', 'dist', 'backend', 'backend-shim.cjs');
+    if (existsSync(unpacked)) return unpacked;
+  }
+  return join(appRoot(), 'dist', 'backend', 'backend-shim.cjs');
+}
+
+/**
+ * The URL of the backend's **real** entry point.
+ *
+ * The shim is unpacked, but the entry point is not: it stays inside the
+ * archive. So the two are in different places, and the shim cannot find its
+ * sibling by looking beside itself — it has to be told where the entry point
+ * really is.
+ *
+ * The main process knows both places: the archive, at
+ * `resources/app.asar/dist/backend/backend-entry.js`, and the unpacked tree.
+ * Electron's own file API reads the archive, so a `file://` URL into it is
+ * what the shim needs.
+ */
+function backendEntryUrl(): string {
+  const resources = resourcesPath();
+  if (resources) {
+    const inArchive = join(resources, 'app.asar', 'dist', 'backend', 'backend-entry.js');
+    // Electron patches the file system, so `existsSync` sees into the
+    // archive from the main process.
+    if (existsSync(inArchive)) {
+      return pathToFileURL(inArchive).href;
+    }
+  }
+  return pathToFileURL(join(appRoot(), 'dist', 'backend', 'backend-entry.js')).href;
+}
+
+/**
+ * Where the vendored Mini App is, for the backend.
+ *
+ * The backend resolves it itself — it has its own candidate list — so this
+ * is only a hint, and it is only set when the app already knows.
+ */
+function pluginRootHint(): string | undefined {
+  const resources = resourcesPath();
+  if (!resources) return undefined;
+  const unpacked = join(resources, 'app.asar.unpacked', 'dist', 'vendor', 'minimax-bot');
+  if (existsSync(unpacked)) return unpacked;
+  const inArchive = join(resources, 'app.asar', 'dist', 'vendor', 'minimax-bot');
+  if (existsSync(inArchive)) return inArchive;
+  return undefined;
+}
+
+/**
  * Start the backend utility process.
  *
  * The backend runs in its own process so that a crash in a tool — or in the
@@ -73,7 +147,9 @@ export function isReady(): boolean {
  */
 function startBackend(token: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    backend = utilityProcess.fork(join(appRoot(), 'dist', 'backend', 'backend-entry.js'), [], {
+    const entry = backendEntry();
+    trace('backend', `forking ${entry}`);
+    backend = utilityProcess.fork(entry, [], {
       serviceName: 'minibots-backend',
       stdio: 'inherit',
       env: {
@@ -82,7 +158,10 @@ function startBackend(token: string): Promise<void> {
         MINIBOTS_SESSION_DIR: sessionDir(),
         MINIBOTS_AGENT_DIR: agentDir(),
         MINIBOTS_TOKEN: token,
-        MINIBOTS_PLUGIN_ROOT: join(appRoot(), 'vendor', 'minimax-bot'),
+        // The shim is unpacked but the entry point is not, so the shim has to
+        // be told where the entry point really is.
+        MINIBOTS_BACKEND_ENTRY: backendEntryUrl(),
+        ...(pluginRootHint() ? { MINIBOTS_PLUGIN_ROOT: pluginRootHint()! } : {}),
       },
     });
 
@@ -90,10 +169,12 @@ function startBackend(token: string): Promise<void> {
       const payload = message as { type?: string; ready?: BackendReady; error?: string };
       if (payload?.type === 'backend-ready' && payload.ready) {
         backendAddress = payload.ready;
+        trace('backend', `ready on ${payload.ready.port}`);
         resolve();
         return;
       }
       if (payload?.type === 'backend-error') {
+        traceError('backend', new Error(payload.error ?? 'The backend failed to start.'));
         reject(new Error(payload.error ?? 'The backend failed to start.'));
       }
     });
@@ -102,6 +183,7 @@ function startBackend(token: string): Promise<void> {
       backend = undefined;
       backendAddress = undefined;
       ready = false;
+      trace('backend', `exited with code ${code}`);
       if (code !== 0) {
         // eslint-disable-next-line no-console
         console.error(`[minibots] the backend exited with code ${code}`);
@@ -521,16 +603,25 @@ async function applyStartAtLogin(enabled: boolean): Promise<void> {
 
 /** Boot the app. */
 async function bootstrap(): Promise<void> {
+  // The log comes first, so that a failure in any later step is recorded.
+  useLogDirectory(userDataDir());
+  trace('bootstrap', `app root: ${appRoot()}`);
+  trace('bootstrap', `resources: ${resourcesPath() ?? 'none'}`);
+  trace('bootstrap', `backend entry: ${backendEntry()}`);
+
   credentials = new CredentialService({ path: credentialPath(), safeStorage });
   await credentials.load().catch(() => ({ loaded: [], failed: [] }));
+  trace('bootstrap', 'credentials loaded');
 
   settings = new SettingsStore(settingsPath());
   await settings.load().catch(() => undefined);
+  trace('bootstrap', 'settings loaded');
 
   const token = randomBytes(32).toString('base64url');
   registerIpc();
   installRequestAuthentication();
   installTray();
+  trace('bootstrap', 'tray and ipc ready');
 
   // The backend comes up first.
   //
@@ -539,14 +630,163 @@ async function bootstrap(): Promise<void> {
   // the window loads the real URL the first time, instead of showing a blank
   // page and then being navigated somewhere else.
   await startBackend(token);
+  trace('bootstrap', `backend listening on ${backendAddress?.port ?? '?'}`);
   ready = true;
 
   createWindow();
+  trace('bootstrap', 'window created');
 
   // The start-at-sign-in preference is the app's own, and it is applied once
   // the app knows whether it is installed.
   if (settings.current.startAtLogin && app.isPackaged) {
     app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: [] });
+  }
+
+  // The self-check: the packaged app checks itself.
+  //
+  // The report goes to a file, because Electron on Windows does not write to
+  // the console of a GUI application. The check is only ever run when the
+  // environment names a report file, so a normal launch never takes this
+  // path.
+  const reportPath = process.env.MINIBOTS_SELF_CHECK;
+  if (reportPath) {
+    await runSelfCheck(reportPath);
+  }
+}
+
+/**
+ * The app's own check.
+ *
+ * It runs **inside** the app — packaged or not — and reports whether the
+ * window appeared, whether the client really loaded, and whether the backend
+ * answered. It is how the packaged artifact is verified: the check runs in
+ * the real application, not in a script beside it.
+ */
+async function runSelfCheck(reportPath: string): Promise<void> {
+  const passed: string[] = [];
+  const failed: string[] = [];
+  writeFileSync(reportPath, 'MiniBots self check\n\n', 'utf8');
+  const say = (line: string): void => {
+    appendFileSync(reportPath, `${line}\n`, 'utf8');
+  };
+  const check = (name: string, ok: boolean, detail = ''): void => {
+    if (ok) {
+      passed.push(name);
+      say(`PASS  ${name}${detail ? ` — ${detail}` : ''}`);
+    } else {
+      failed.push(name);
+      say(`FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
+    }
+  };
+
+  /** Wait for a condition, up to a timeout. */
+  const until = async (predicate: () => boolean | Promise<boolean>, timeoutMs = 60_000): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await predicate()) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  };
+
+  try {
+    const appeared = await until(() => BrowserWindow.getAllWindows().length > 0);
+    check('a window is created', appeared);
+    if (!appeared) throw new Error('no window appeared');
+
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) throw new Error('no window');
+
+    const loaded = await until(
+      () => !window.webContents.isLoading() && window.webContents.getURL().startsWith('http://127.0.0.1:'),
+    );
+    check('the window loads a page', loaded, window.webContents.getURL());
+    check(
+      "the page is served from the app's own loopback origin",
+      window.webContents.getURL().startsWith('http://127.0.0.1:'),
+      window.webContents.getURL(),
+    );
+
+    const bridgePresent = await window.webContents.executeJavaScript(
+      'typeof window.minibots === "object" && window.minibots !== null',
+    );
+    check('the preload bridge is exposed to the renderer', bridgePresent === true);
+
+    const backendUp = await until(async () => {
+      const state = await window.webContents.executeJavaScript(
+        'window.minibots.request({ path: "/api/state" })',
+      );
+      return state?.status === 200;
+    });
+    check('the backend becomes ready', backendUp);
+
+    const renderState = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(`
+        (() => {
+          const side = document.getElementById('side-list');
+          return JSON.stringify({
+            background: getComputedStyle(document.body).backgroundColor,
+            children: side ? side.children.length : 0,
+          });
+        })()
+      `);
+      const state = JSON.parse(String(probe));
+      return state.children > 0 && state.background !== 'rgba(0, 0, 0, 0)';
+    });
+    check('the client really rendered', renderState);
+
+    // The body's background colour, read as a plain string. It is a CSS
+    // colour, not JSON, so it is **not** parsed.
+    const style = String(
+      await window.webContents.executeJavaScript(
+        'getComputedStyle(document.body).backgroundColor',
+      ),
+    );
+    check('the client\'s stylesheet loaded', style !== 'rgba(0, 0, 0, 0)', `body background: ${style}`);
+
+    const fetched = await window.webContents.executeJavaScript(
+      'fetch("/api/state").then((r) => r.text()).then((t) => t.includes(\'"bots"\'))',
+    );
+    check('the page can fetch the API with a relative path', fetched === true);
+
+    // The app's own window: the provider settings and the inspectors.
+    await window.webContents.executeJavaScript('window.minibots.openAppWindow()');
+    const appWindowAppeared = await until(
+      () =>
+        BrowserWindow.getAllWindows().some((candidate) =>
+          candidate.webContents.getURL().endsWith('/app'),
+        ),
+      30_000,
+    );
+    check("the app's own window opens", appWindowAppeared);
+
+    const providers = await window.webContents.executeJavaScript(
+      'window.minibots.listProviders().then((r) => r.providers.length)',
+    );
+    check('the app offers its providers', providers === 4, `providers: ${providers}`);
+
+    // The tray's icon. A packaged build keeps the icon inside the archive,
+    // so this is the check that the icon is really there and really loads.
+    const trayIcon = trayIconPath();
+    check(
+      'the tray icon is present',
+      Boolean(trayIcon),
+      trayIcon ?? 'no tray icon was found',
+    );
+    if (trayIcon) {
+      const image = nativeImage.createFromPath(trayIcon);
+      check(
+        'the tray icon loads',
+        !image.isEmpty(),
+        `${image.getSize().width}×${image.getSize().height}`,
+      );
+    }
+  } catch (error) {
+    failed.push('the self check');
+    say(`FAIL  the self check — ${error instanceof Error ? error.stack : String(error)}`);
+  } finally {
+    say(`\n=== ${passed.length}/${passed.length + failed.length} checks passed ===`);
+    app.exit(failed.length === 0 ? 0 : 1);
   }
 }
 
@@ -561,6 +801,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(bootstrap).catch((error: unknown) => {
+    traceError('startup', error);
     // eslint-disable-next-line no-console
     console.error('[minibots] startup failed:', error);
     app.quit();

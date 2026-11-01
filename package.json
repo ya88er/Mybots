@@ -3,8 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "MiniBots — a standalone Windows desktop app for multi-bot AI collaboration, built on the Pi coding-agent SDK.",
+  "author": {
+    "name": "MiniBots contributors"
+  },
+  "homepage": "https://github.com/ya88er/Mybots",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ya88er/Mybots.git"
+  },
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/main/main.js",
   "license": "MIT",
   "engines": {
     "node": ">=22.19.0"
@@ -22,8 +30,9 @@
     "test:smoke": "node scripts/smoke-runtime.mjs",
     "test:smoke:electron": "electron scripts/smoke-electron-main.mjs",
     "test:smoke:shell": "electron scripts/smoke-electron-shell.mjs",
-    "dist:win": "npm run build && electron-builder --win --x64 --config electron-builder.yml",
+    "dist:win": "npm run build && node scripts/package.mjs",
     "verify:package": "node scripts/verify-package.mjs",
+    "checksums": "node scripts/checksums.mjs",
     "verify:upstream": "node scripts/verify-upstream.mjs"
   },
   "devDependencies": {

@@ -23,7 +23,7 @@
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { start as startMiniApp } from './upstream-miniapp.ts';import { DispatchingAgent, withCaller, type CallerIdentity } from '../runtime/dispatching-agent.ts';
 import { DispatchLedger } from '../runtime/dispatch-ledger.ts';
@@ -34,6 +34,7 @@ import { ScheduleCatchUp } from '../runtime/schedule-catchup.ts';
 import { inspectSessions } from '../runtime/session-inspector.ts';
 import { ToolDispatch, type UpstreamDispatch } from '../tools/tool-dispatch.ts';
 import { isAppPath, readAppFile } from '../main/app-ui-server.ts';
+import { resourcesPath, resourcesRoot } from '../main/resources.ts';
 import type { GateResponse } from './backend-gate.ts';
 
 export interface BackendOptions {
@@ -138,7 +139,7 @@ export async function startBackend(options: BackendOptions): Promise<{
   // The vendored Mini App lives next to the app's code. In a packaged build
   // the resources are unpacked, because Electron 45 restricts file
   // descriptors inside an ASAR archive.
-  const pluginRoot = resolvePluginRoot();
+  const pluginRoot = await resolvePluginRoot(log);
 
   // The upstream Mini App resolves its own listen address from the context
   // and does not report the port back. So the host picks a free ephemeral port
@@ -298,37 +299,58 @@ export async function startBackend(options: BackendOptions): Promise<{
 }
 
 /**
- * Where the vendored Mini App lives.
+ * Whether a file inside a candidate Mini App root really is there.
  *
- * In development that is the repository's `vendor/minimax-bot`. In a packaged
- * build the resources are unpacked next to the executable, because Electron 45
- * restricts file descriptors inside an ASAR archive.
+ * A path inside an archive may not answer `existsSync` in the utility
+ * process, because the archive is read through a URL rather than through the
+ * file system. So both are tried: the plain path first, and then the file's
+ * own URL.
  */
-function resolvePluginRoot(): string {
-  const candidates = [
-    process.env.MINIBOTS_PLUGIN_ROOT,
-    join(process.cwd(), 'vendor', 'minimax-bot'),
-    // In a packaged build the resources are unpacked next to the executable.
-    resourcesPath() && join(resourcesPath()!, 'app', 'vendor', 'minimax-bot'),
-    join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'vendor', 'minimax-bot'),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'miniapp', 'node', 'server.mjs'))) {
-      return candidate;
-    }
+async function miniAppEntryExists(root: string): Promise<boolean> {
+  const entry = join(root, 'miniapp', 'node', 'server.mjs');
+  if (existsSync(entry)) return true;
+  try {
+    await import(pathToFileURL(entry).href);
+    return true;
+  } catch {
+    return false;
   }
-  throw new Error('The MiniBots Mini App was not found. Set MINIBOTS_PLUGIN_ROOT.');
 }
 
 /**
- * Electron's `process.resourcesPath`, when the process runs inside Electron.
+ * Where the vendored Mini App lives.
  *
- * The backend runs in an Electron utility process, so the path is there; in a
- * plain Node process it is not, and the development layout is used instead.
+ * In development that is the repository's `vendor/minimax-bot`. In a packaged
+ * build it is inside the archive, at `app.asar/dist/vendor/minimax-bot`: the
+ * upstream server reads the client's files with `readFile`, which works
+ * through an archive.
+ *
+ * The backend itself runs from the **unpacked** tree, so the development
+ * layout's relative path does not apply to a packaged build; the archive's
+ * own path is tried explicitly.
  */
-function resourcesPath(): string | undefined {
-  const value = (process as unknown as { resourcesPath?: unknown }).resourcesPath;
-  return typeof value === 'string' ? value : undefined;
+async function resolvePluginRoot(
+  log: (level: 'debug' | 'info' | 'warn' | 'error', message: string, fields?: Record<string, unknown>) => void,
+): Promise<string> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.MINIBOTS_PLUGIN_ROOT,
+    join(process.cwd(), 'vendor', 'minimax-bot'),
+    // The development layout.
+    join(here, '..', '..', 'vendor', 'minimax-bot'),
+    // The packaged layout: inside the archive, beside the unpacked tree.
+    resourcesPath() && join(resourcesPath()!, 'app.asar', 'dist', 'vendor', 'minimax-bot'),
+    // A build that unpacks the vendored tree too.
+    resourcesRoot() && join(resourcesRoot()!, 'dist', 'vendor', 'minimax-bot'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    if (await miniAppEntryExists(candidate)) {
+      log('info', 'minibots.plugin_root', { root: candidate });
+      return candidate;
+    }
+  }
+  log('error', 'minibots.plugin_root_missing', { candidates: candidates.join(' | ') });
+  throw new Error('The MiniBots Mini App was not found. Set MINIBOTS_PLUGIN_ROOT.');
 }
 
 /**

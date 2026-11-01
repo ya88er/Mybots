@@ -602,10 +602,10 @@ means the same checker covers it.
 
 | Suite | Command | Result |
 |---|---|---|
-| Types | `npm run typecheck` | 3/3 configurations pass |
+| Types | `npm run typecheck` | 4/4 configurations pass |
 | Runtime | `npm run test:runtime` | 17/17 |
-| Desktop | `npm run test:desktop` | 24/24 |
-| Integration | `npm run test:integration` | 51/51 |
+| Desktop | `npm run test:desktop` | 29/29 |
+| Integration | `npm run test:integration` | 54/54 |
 | Upstream | `npm run test:upstream` | 343/343 |
 | Shell | `npm run test:smoke:shell` | **21/21 checks passed** |
 
@@ -617,13 +617,332 @@ and closing the window hides it instead of quitting.
 
 ---
 
-## 13. What is still unverified
+## 13. The Windows release — M6 findings
+
+### The ASAR packager's unpack list must stay short
+
+The first packaging attempt failed with:
+
+```
+TypeError: pattern is too long
+    at assertValidPattern (…\@electron\asar\node_modules\minimatch\minimatch.js:281:11)
+    at isUnpackedDir (…\@electron\asar\src\asar.ts:23:47)
+```
+
+`@electron/asar` joins **every unpacked file's path** into a single
+brace-expansion glob, and `minimatch` refuses a pattern longer than 64 KB.
+Unpacking the whole Pi runtime — 2,579 files — produces a glob far longer
+than that, and the build fails.
+
+The fix is to unpack only what genuinely needs a real file on the disk:
+
+```yaml
+asarUnpack:
+  - dist/node_modules/@earendil-works/pi-tui/native/win32
+```
+
+Two files. The glob is short, and the build succeeds.
+
+### Only the native prebuilds need a real path
+
+Electron 45 restricts file descriptors inside an ASAR archive, so a **native
+addon** cannot be loaded from one — it has to be a real file. That is the
+only thing that has to be unpacked:
+
+| What | Where it lives in the packaged app | Why |
+|---|---|---|
+| Pi's native prebuilds | `app.asar.unpacked/dist/node_modules/…/native/win32` | loaded through `dlopen`, which needs a real path |
+| The backend's shim | `app.asar.unpacked/dist/backend/backend-shim.cjs` | a forked process needs a real file to run |
+| The vendored Mini App | inside `app.asar` | the upstream server reads the client with `readFile`, which works through an archive |
+| The Pi runtime | inside `app.asar` | imported by its bare package name, which Node resolves through the archive's own `node_modules` |
+
+The archive holds **9,474** entries. `scripts/verify-package.mjs` lists the
+archive and checks each of these by name.
+
+### `rcedit` needs Developer Mode or administrator rights
+
+The second packaging attempt failed while extracting electron-builder's
+`winCodeSign` tool:
+
+```
+errorOut=ERROR: Cannot create symbolic link : A required privilege is not
+held by the client. : …\winCodeSign\103299411\darwin\10.12\lib\libcrypto.dylib
+```
+
+The archive contains macOS symbolic links, and creating one on Windows needs
+Developer Mode or administrator rights — which a build machine does not
+necessarily have. The two failing links are for **macOS** libraries, which a
+Windows build does not use at all.
+
+`signAndEditExecutable: false` skips the tool. The consequence is stated
+plainly: the **executable** keeps Electron's own icon, while the installer
+and the Start menu entry carry the app's icon. That is a cosmetic
+limitation of an unsigned, non-elevated build, and it is recorded here
+rather than hidden.
+
+### The app checks itself
+
+A packaged app cannot be checked by a script beside it: the script's
+`electron` import resolves to the npm package, not to the application's
+runtime. The check therefore lives **inside** the app.
+
+`MINIBOTS_SELF_CHECK` names a report file; when the environment sets it, the
+main process runs the check after the backend is up and writes the report to
+that file, then exits with a status code. A normal launch never takes that
+path — the variable is simply not set.
+
+`scripts/verify-package.mjs` launches `release/win-unpacked/MiniBots.exe`
+with the variable set and reads the report. The check runs in the **real
+packaged application**: the real window, the real utility process, the real
+vendored client.
+
+### The packaged app has no console — it needs a log of its own
+
+On Windows, a GUI application does not write to a console at all. A packaged
+app that cannot start therefore says **nothing**: there is no output, no
+exit code, and — worst of all — the JavaScript error dialog waits for a
+click, so the process never exits either.
+
+Three things came out of this:
+
+1. **The app writes its own log.** `src/main/app-log.ts` writes
+   `minibots.log` into the app's user-data directory, and every step of the
+   start-up is traced into it. The last line before a hang is where the
+   hang is.
+
+2. **The verification reads the crash dialog.** A dialog is a real Windows
+   window, so its text is read through the UI Automation API
+   (`scripts/read-window-text.ps1`). The verification now reports *why* the
+   app failed to start instead of timing out silently.
+
+3. **The app's own log is the first thing that is written.** It is written
+   before anything else, so a failure in any later step is recorded.
+
+### Four packaging defects, each found by running the real artifact
+
+The packaged app failed four times before it started. Each failure was
+found by **launching the built artifact**, not by reading the code.
+
+#### 1. The compiled output was CommonJS, not ESM
+
+The sources are ESM, but a `.js` file is only read as ESM when the nearest
+`package.json` says `"type": "module"`. `dist/` had no `package.json`, so
+Node read `dist/backend/backend-entry.js` as CommonJS and failed:
+
+```
+Cannot find module 'file:///…/dist/backend/backend-entry.js'
+```
+
+The build now writes `dist/package.json`. (In the packaged app the
+**archive's** own root `package.json` is the nearest ancestor of `dist/`,
+and it already carries `"type": "module"`.)
+
+#### 2. The CommonJS transform rewrote the shim's dynamic import
+
+The backend's shim is CommonJS, because it is the one file Electron forks.
+It was being **compiled**, and TypeScript's CommonJS transform rewrites
+`import(specifier)` into `require(specifier)`:
+
+```js
+// dist/backend/backend-shim.cjs, as it was
+Promise.resolve(`${pathToFileURL(entry).href}`).then(s => __importStar(require(s)))
+```
+
+That is a `require` of a `file://` URL, which cannot work. The shim is now
+**copied verbatim** and never compiled, so the real dynamic import survives —
+and it is the only thing that can load an ES module. It is still
+type-checked, in its own CommonJS configuration.
+
+#### 3. The utility process is not a browser process
+
+`src/main/paths.ts` imported `electron`'s `app`, and the backend imported
+`paths.ts`:
+
+```
+SyntaxError: The requested module 'electron' does not provide an export named 'app'
+```
+
+A utility process has no `app`. The two path helpers the backend needs —
+`resourcesPath()` and `resourcesRoot()` — now live in
+`src/main/resources.ts`, which has no Electron dependency at all and reads
+`process.resourcesPath`, a plain process property.
+
+#### 4. The packager's file list was incomplete
+
+`electron-builder.yml` listed `dist/main`, `dist/backend`, `dist/app`,
+`dist/client`, `dist/vendor` and `dist/node_modules` — but not
+`dist/storage`, `dist/runtime` or `dist/tools`. A directory that is not in
+the list is dropped silently, and the app then failed at start-up with a
+dialog reading:
+
+```
+Cannot find module '…/app.asar/dist/storage/atomic-json.js'
+```
+
+The list is now `dist/**/*`, so a new directory is shipped automatically.
+
+### The unpacked shim is not beside the entry point
+
+The shim is unpacked onto the disk; the entry point stays inside the
+archive. So the two are in **different places**, and the shim could not
+find its neighbour:
+
+```
+Cannot find module '…/app.asar.unpacked/dist/backend/backend-entry.js'
+```
+
+The main process knows both places — it can see into the archive through
+Electron's own file API — so it passes the entry point's URL to the shim in
+`MINIBOTS_BACKEND_ENTRY`. The shim uses it when it is given, and falls back
+to its neighbour for a development run.
+
+### A static import of the vendored subtree is wrong in a packaged build
+
+The upstream Mini App's server was imported statically:
+
+```ts
+import { start as startUpstream } from '../../vendor/minimax-bot/miniapp/node/server.mjs';
+```
+
+That specifier is relative to the **source** file, so the compiled output in
+`dist/backend/` asks for `../../vendor/…` — the app's root, not `dist/`. In a
+development run that happens to be right, because the vendored tree is copied
+to the repository's own `vendor/` as well. In a packaged build it is one level
+out:
+
+```
+Cannot find module '…/app.asar/vendor/minimax-bot/miniapp/node/server.mjs'
+```
+
+The upstream server is now loaded **dynamically, from the path the host
+resolves** — the same `pluginRoot` the Mini App is started with. A `file://`
+URL is used, so the loader can also reach inside the archive.
+
+The same reasoning applies to the Mini App's own existence check: a path
+inside an archive may not answer `existsSync` in the utility process, so the
+check tries the plain path first and the file's own URL second.
+
+### The verification checks the whole module graph
+
+The verification used to check a handful of named files. That is not
+enough: the fourth defect above shipped four of the app's own directories
+without tripping a single check.
+
+The verification now walks the archive's own listing and resolves **every
+relative import** in the compiled app against it. A file the app needs and
+the archive does not have is a failure, by name. A check that finds nothing
+is reported as a check that did not run, rather than as a pass.
+
+### A build writes into a directory of its own
+
+A freshly written archive is often opened by a scanner without
+`FILE_SHARE_DELETE`, and such a file **cannot be deleted** — not even
+renamed. The next build then fails with:
+
+```
+remove …\release\win-unpacked\resources\app.asar: The process cannot access
+the file because it is being used by another process.
+```
+
+So every build writes into a directory named after the moment it was built,
+and the previous build's directory is left alone. `scripts/package.mjs`
+reports the directories Windows will not let go, rather than pretending they
+were cleared.
+
+### The icons are made from the upstream skin
+
+The app's icon and its tray icon are derived from the upstream Mini App's
+`fuzzy` skin — the bot face the upstream client already uses as its brand
+mark — so the app and the Mini App wear the same face, and the upstream art
+keeps its notice.
+
+`scripts/make-icons.mjs` reads the upstream PNG, undoes its per-row filters,
+downsamples it with a box filter and writes a new PNG. It is written by hand
+rather than with an image library, because the build has no image dependency:
+a 32×32 RGBA PNG is a few hundred bytes of zlib data.
+
+The tray icon is drawn at **32×32**, because Windows scales a tray icon into
+a 16-pixel box and a large picture is drawn tiny and muddy.
+
+### A stray Electron process holds the single-instance lock
+
+The app takes a single-instance lock, so a second copy quits immediately. A
+leftover Electron process from an earlier run therefore makes the **next**
+run quit before it writes a single check, and the report is empty.
+
+`scripts/verify-all.ps1` therefore clears stray Electron processes before
+each Electron run. The same applies to the packaged app: a `MiniBots.exe`
+left running holds `release/win-unpacked/resources/app.asar` open, and the
+next packaging attempt fails with "The process cannot access the file
+because it is being used by another process."
+
+
+### The M6 verification
+
+`npm run verify:package` → **34/34 checks passed**.
+
+It confirms, against the built artifact:
+
+- the unpacked build, the archive and the unpacked tree all exist;
+- the app's own code, the preload, the app's own pages and the client are all
+  inside the archive;
+- the app's **whole module graph** is in the archive — 95 relative imports
+  resolved across 60 compiled files;
+- the vendored Mini App and the Pi runtime are inside the archive;
+- the Windows native prebuilds and the backend's shim are **on the disk**,
+  outside the archive;
+- the archive's own `package.json` marks the build as an ES module and points
+  at the app's entry point;
+- every shipped package states its licence, and the upstream Mini App's own
+  licence notice and list of modifications travel with the code;
+- the installer exists, is not empty, and its SHA-256 is recorded;
+- the packaged app **starts**: the window appears, the page is served from
+  the app's own origin, the preload bridge is installed, the backend
+  answers, the client's stylesheet loads, the client's module script runs,
+  the page's own relative fetch is authenticated, and the app's own window
+  opens with its four providers, and the tray icon loads from inside the archive — **12/12** inside the app itself.
+
+### The M6 verification, as a whole
+
+| Suite | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | 4/4 configurations pass |
+| Runtime | `npm run test:runtime` | 17/17 |
+| Desktop | `npm run test:desktop` | 29/29 |
+| Integration | `npm run test:integration` | 54/54 |
+| Upstream | `npm run test:upstream` | 343/343 |
+| Electron desktop | `scripts/desktop-tests.mjs` | **22/22 checks passed** |
+| Shell | `npm run test:smoke:shell` | **21/21 checks passed** |
+| Package | `npm run verify:package` | **34/34 checks passed** |
+| Providers | `npm run test:providers` | **UNTESTED** — no key configured |
+
+---
+
+## 14. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|
 | DeepSeek / MiniMax / OpenAI real file task | **UNTESTED** | no provider key configured |
 | MCP server call, failure, reconnect | not yet exercised | needs the tool dispatch layer (M3) |
-| Packaged build loading Pi's runtime assets | not yet exercised | M6 |
 | Native process-tree cancellation | not yet exercised | needs the tool dispatch layer (M3) |
-| The packaged app's start-at-sign-in entry | not yet exercised | needs the installed build (M6) |
-| The installed app's tray icon | not yet exercised | needs the installed build (M6) |
+| The installer run from a path with spaces and Unicode | not yet exercised | the installer is a per-user NSIS installer that lets the user choose the folder; it has not been installed on this machine |
+| The installed app's start-at-sign-in entry | not yet exercised | needs the installed build |
+| The installed app's tray icon | not yet exercised | needs the installed build |
+| Upgrade preserving the data | not yet exercised | needs two installed versions |
+| The executable's own icon | **known limitation** | `rcedit` needs Developer Mode or administrator rights; the installer and the Start menu entry carry the app's icon, the executable keeps Electron's |
+
+Two of these are worth spelling out, because the difference between "not
+exercised" and "known broken" matters.
+
+**The start-at-sign-in entry** is written by
+`app.setLoginItemSettings({ openAtLogin, path: process.execPath })`, which is
+Electron's own API and is only called when `app.isPackaged` is true. The
+packaged build *is* `isPackaged`, and the verification launches it — but the
+verification does not read the Windows registry, so whether the entry landed
+is not measured.
+
+**The upgrade path** depends on the installer replacing the program files and
+leaving `%APPDATA%\minibots` alone. The installer is configured with
+`deleteAppDataOnUninstall: false` and `perMachine: false`, which is the
+configuration that does that — but a measurement needs two installed
+versions, and only one has been built.

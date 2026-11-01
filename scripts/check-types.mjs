@@ -62,4 +62,28 @@ check(
   ],
 );
 
+// The backend's shim, as CommonJS.
+//
+// The shim is copied rather than compiled — the CommonJS transform would
+// rewrite its dynamic `import()` into a `require()` — so it is checked on its
+// own, in the mode it is actually run in.
+check(
+  'the backend shim',
+  [
+    '--noEmit',
+    '--module',
+    'CommonJS',
+    '--moduleResolution',
+    'Node10',
+    '--target',
+    'ES2022',
+    '--skipLibCheck',
+    '--esModuleInterop',
+    '--strict',
+    '--noUncheckedIndexedAccess',
+    join(root, 'src', 'types', 'electron-process.d.ts'),
+    join(root, 'src', 'backend', 'backend-shim.cts'),
+  ],
+);
+
 process.exit(0);

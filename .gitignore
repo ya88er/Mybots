@@ -8,6 +8,16 @@ release/
 out/
 *.tsbuildinfo
 
+# The generated icons: they are made from the upstream skin by
+# `scripts/make-icons.mjs`, so they are not committed.
+build/icon.png
+build/icon-64.png
+build/tray-icon.png
+
+# The verification reports
+package-verification-report.txt
+package-verification-report-launch.txt
+
 # Electron runtime caches
 .vite/
 .cache/
@@ -46,3 +56,6 @@ client-origin-probe.txt
 dev-launch.log
 dev-launch.err
 .tmp-*
+
+# The scratch directory for the packaging probes and their output
+ops/

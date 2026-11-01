@@ -112,24 +112,41 @@ export function isQuitting(): boolean {
 }
 
 /**
- * The tray icon's image.
+ * Where the tray icon is, when it can be found.
  *
- * The app ships a small PNG; when it is missing — in a development run, for
- * instance — an empty icon is used, which is still a valid tray icon and
- * keeps the tray's presence testable.
+ * The app ships a small PNG, made from the upstream Mini App's own skin. The
+ * packaged build keeps it inside the archive, beside the app's own code, so
+ * the app's root is where it is looked for first.
+ *
+ * The upstream skin the icon is made from is the last resort, for a
+ * development run that has not been built.
  */
-function trayImage(): Electron.NativeImage {
+export function trayIconPath(): string | undefined {
   const candidates = [
     join(appRoot(), 'build', 'tray-icon.png'),
+    // The packaged build keeps the icon next to the app's resources.
     join(appRoot(), 'resources', 'tray-icon.png'),
-    join(appRoot(), 'vendor', 'minimax-bot', 'miniapp', 'client', 'skins', 'default.png'),
+    // The upstream skin the icon is made from, as a last resort.
+    join(appRoot(), 'vendor', 'minimax-bot', 'miniapp', 'client', 'skins', 'fuzzy.png'),
   ];
   for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    const image = nativeImage.createFromPath(candidate);
-    if (!image.isEmpty()) return image;
+    if (existsSync(candidate)) return candidate;
   }
-  return nativeImage.createEmpty();
+  return undefined;
+}
+
+/**
+ * The tray icon's image.
+ *
+ * When the icon is missing — in a development run that has not been built,
+ * for instance — an empty icon is used, which is still a valid tray icon
+ * and keeps the tray's presence testable.
+ */
+function trayImage(): Electron.NativeImage {
+  const path = trayIconPath();
+  if (!path) return nativeImage.createEmpty();
+  const image = nativeImage.createFromPath(path);
+  return image.isEmpty() ? nativeImage.createEmpty() : image;
 }
 
 /**

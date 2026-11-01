@@ -1,0 +1,123 @@
+# The MiniBots Windows build.
+#
+# A per-user NSIS installer: no administrator rights are needed, and the app
+# installs into the user's own AppData.
+#
+# The important part is `asarUnpack`. Electron 45 restricts file descriptors
+# inside an ASAR archive, so a native addon — or anything that reads its own
+# files through a file descriptor — cannot run from inside one. Pi's native
+# prebuilds and the vendored Mini App are therefore unpacked onto the disk.
+appId: local.minibots.desktop
+productName: MiniBots
+copyright: MiniBots — derived from the MiniMax Bot Mini App (MIT)
+
+directories:
+  # The output directory.
+  #
+  # The packaging script overrides this per build, so that a stale archive
+  # from an earlier build — which Windows will not let a scanner release — is
+  # never in the way. See `scripts/package.mjs`.
+  output: release
+  buildResources: build
+
+# The app's own entry points.
+#
+# The whole compiled tree is shipped: `dist/main`, `dist/backend`,
+# `dist/runtime`, `dist/storage`, `dist/tools`, `dist/app` and `dist/client`
+# are all imported by each other, so leaving one out breaks the app at
+# start-up with "Cannot find module". The list is written as `dist/**/*` for
+# that reason — a new directory is then shipped automatically.
+#
+# The preload is compiled separately, as CommonJS, because a sandboxed preload
+# is loaded that way.
+files:
+  - dist/**/*
+  - build/tray-icon.png
+  - package.json
+  - '!**/*.map'
+  # The native prebuilds for macOS and Linux are dead weight in a Windows
+  # build, and every unpacked file's path joins the packager's single
+  # brace-expansion glob.
+  - '!dist/node_modules/@earendil-works/pi-tui/native/darwin/**'
+  - '!dist/node_modules/@earendil-works/pi-tui/native/linux/**'
+  - '!**/node_modules/*/{test,tests,__tests__,example,examples,doc,docs}/**'
+  - '!**/node_modules/*/*.{md,markdown,ts,cts,mts}'
+
+# Everything that must exist as a real file on the disk.
+#
+# - Pi's native prebuilds are loaded through `dlopen`, which needs a real
+#   path;
+# - the vendored Mini App is read by the backend with `readFile`, and the
+#   upstream server serves the client from it;
+# - the Pi packages themselves are imported by path from the backend, so
+#   they must sit where the source expects them.
+asar: true
+
+# Only the **native prebuilds** are unpacked from the archive.
+#
+# Electron 45 restricts file descriptors inside an ASAR archive, so a native
+# addon cannot be loaded from one: it has to be a real file on the disk.
+#
+# The unpack list must stay short. The ASAR packager joins every unpacked
+# file's path into a single brace-expansion glob, and that glob overflows
+# minimatch's 64 KB limit ("pattern is too long") once a few thousand files
+# are unpacked. Unpacking the whole Pi runtime therefore fails; unpacking
+# the handful of native prebuilds does not.
+asarUnpack:
+  - dist/node_modules/@earendil-works/pi-tui/native/win32
+  # The backend's **shim**.
+  #
+  # The backend is a **utility process**: it is a separate Node process that
+  # Electron forks, and a forked process needs a real file to run. A script
+  # inside an ASAR archive cannot be forked, so a tiny shim is unpacked and
+  # the real entry point stays in the archive, where Node can resolve the Pi
+  # runtime from `dist/node_modules`.
+  #
+  # The shim is one file, so the unpack list stays well inside minimatch's
+  # 64 KB pattern limit.
+  - dist/backend/backend-shim.cjs
+
+# The vendored Mini App and the Pi runtime stay **inside** the archive.
+#
+# The upstream server reads the client's files with `readFile`, which works
+# through an archive, and Pi is imported by its bare package name, which
+# Node resolves through the archive's own `node_modules`. Only the native
+# prebuilds need a real path — see `asarUnpack` above.
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+  # The app's own icon, at every size Windows asks for.
+  artifactName: MiniBots-Setup-${version}-${arch}.${ext}
+  legalTrademarks: MiniBots
+  # The executable's icon and version information are written by `rcedit`,
+  # which comes from electron-builder's `winCodeSign` tool. That tool's
+  # archive contains macOS symbolic links, and extracting them needs
+  # Developer Mode or administrator rights on Windows — which a build
+  # machine does not necessarily have. The executable therefore keeps
+  # Electron's own icon, and the **installer** and the **Start menu** entries
+  # still carry the app's icon.
+  signAndEditExecutable: false
+
+nsis:
+  # A per-user installer: no administrator rights, no UAC prompt.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MiniBots
+  # The uninstaller's icon is left at NSIS's own: writing it needs the same
+  # `rcedit` tool as the executable's icon. See `signAndEditExecutable`.
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  artifactName: MiniBots-Setup-${version}-${arch}.${ext}
+
+# No auto-update: an unsigned personal installer is delivered as a file, and
+# the plan does not assume update hosting.
+publish: null
+generateUpdatesFilesForAllChannels: false

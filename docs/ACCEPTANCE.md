@@ -29,16 +29,22 @@ to the vendored tree).
     `createAgentSession`, `SessionManager`, `ModelRuntime`,
     `createMcpExtension`, `createPowerShellTool`, `defineTool`, `loadSkills`.
   - Evidence: `docs/runtime-validation.md` §2, §3, §6.
-- [ ] Runtime runs inside the packaged Windows app without an external Node or Pi CLI install.
-  - **Partially proven.** The whole application now runs on Electron:
-    `npm run test:smoke:shell` → **21/21 checks passed**. It launches the
-    real main process, the real utility process and a real window; the window
-    loads the real vendored client — **with its stylesheet and its module
-    script working** — and the backend is the real upstream Mini App.
-  - The *packaged* build is not verified yet: Electron 45 restricts file
-    descriptors inside an ASAR archive (`EBADF` for native addons and
-    `child_process` stdio), so Pi's runtime assets must be unpacked. That
-    check belongs to M6 (`npm run verify:package`).
+- [x] Runtime runs inside the packaged Windows app without an external Node or Pi CLI install.
+  - **Proven.** The whole application runs on Electron:
+    `npm run test:smoke:shell` → **21/21 checks passed**, and
+    `npm run verify:package` → **34/34 checks passed** against the **built**
+    artifact. The packaged app starts: the window appears, the page is served
+    from the app's own loopback origin, the preload bridge is installed, the
+    backend answers, the client's stylesheet loads, the client's module script
+    runs, the page's own relative fetch is authenticated, and the app's own
+    window opens with its four providers, and the tray icon loads from inside the archive.
+  - Electron 45 restricts file descriptors inside an ASAR archive (`EBADF` for
+    native addons and `child_process` stdio), so Pi's native prebuilds and the
+    backend's one-file shim are unpacked onto the disk while everything else
+    stays in the archive. The verification checks each of those by name.
+  - The whole module graph of the compiled app is checked against the
+    archive's own listing, so a file the app needs and the archive does not
+    have is a failure by name.
 - [x] Two independently configured sessions run concurrently and restore after restart.
   - **Proven** by `tests/integration/pi-adapter.test.ts` → 11/11 pass.
     Two sessions in the same process keep their own history and never see
@@ -330,8 +336,6 @@ Partially complete.
 
 ## Installed release
 
-Not yet started.
-
 - [x] Existing upstream tests pass, or pre-existing failures have documented dispositions.
   - **343/343 pass**, over five consecutive full-suite runs
     (`npm run test:upstream`).
@@ -353,21 +357,44 @@ Not yet started.
   - Full detail: `docs/runtime-validation.md` §8 and
     `vendor/minimax-bot/MODIFICATIONS.md`.
 - [x] Type checks and runtime/integration/desktop suites pass.
-  - `npm run typecheck` runs **three** configurations, because they are not
-    the same check: the whole tree (`tsconfig.json`), the build
-    (`tsconfig.build.json`) and the preload as CommonJS. All three pass.
-    The build's own configuration caught a real defect that the tree-wide
-    check had passed.
+  - `npm run typecheck` runs **four** configurations, because they are not the
+    same check: the whole tree (`tsconfig.json`), the build
+    (`tsconfig.build.json`), the preload as CommonJS, and the backend's shim
+    as CommonJS. All four pass.
   - `tests/runtime/` → **17/17**. `tests/integration/` → **54/54**.
     `tests/desktop/` → **29/29**.
   - `scripts/desktop-tests.mjs` → **22/22 checks passed** (the tray and the
     window's lifecycle, inside a real Electron process).
-- [ ] Packaged assets, native modules, and Pi resources are present and load successfully.
-  - Not yet (M6).
+  - `scripts/smoke-electron-shell.mjs` → **21/21 checks passed**.
+- [x] Packaged assets, native modules, and Pi resources are present and load successfully.
+  - **Proven** by `npm run verify:package`, which inspects the **built**
+    artifact rather than the source tree, and then launches it.
+  - The vendored Mini App and the Pi runtime stay **inside** the archive:
+    the upstream server reads the client's files with `readFile`, which works
+    through an archive, and Pi is imported by its bare package name, which
+    Node resolves through the archive's own `node_modules`.
+  - Only Pi's **native prebuilds** and the backend's one-file **shim** are
+    unpacked onto the disk, because Electron 45 cannot load a native addon
+    through a file descriptor inside an archive, and a forked process needs a
+    real file to run.
+  - The verification walks the archive's own listing and resolves **every
+    relative import** in the compiled app against it, so a file the app needs
+    and the archive does not have is a failure by name.
+  - The packaged app starts: the window appears, the client loads **with its
+    stylesheet and its module script**, the backend answers, and the page's
+    own relative fetch is authenticated.
+  - Four packaging defects were found this way and fixed; the detail is in
+    `docs/runtime-validation.md` §13.
 - [ ] Installer tested under paths containing spaces and Unicode.
-  - Not yet (M6).
-- [ ] No development server or unrelated global configuration is required.
-  - Not yet (M6).
+  - **Partially proven.** The installer is a per-user NSIS installer that
+    lets the user choose the folder, so a path with spaces and Unicode is
+    supported by construction. It has not been installed and run from such a
+    path on this machine.
+- [x] No development server or unrelated global configuration is required.
+  - **Proven.** The packaged app is launched from the build's own directory
+    and runs with no environment variable and no server: the backend is a
+    utility process of the app itself, and the client is served by the app's
+    own loopback address.
 - [x] Local HTTP/MCP authentication and preview isolation are verified.
   - **Proven.** Every `/api/…` route, the MCP endpoint and the event stream
     are behind the bearer token, and the token is compared in constant time.
@@ -385,28 +412,35 @@ Not yet started.
     the main process, and the shell smoke test asserts that the renderer
     sees no credential.
 - [ ] Upgrade preserves conversations, memory, settings, avatars, and sessions.
-  - Not yet (M6).
+  - **Not exercised.** It needs two installed versions. The app's data lives
+    in Electron's per-user `userData` directory, and the installer is
+    configured with `deleteAppDataOnUninstall: false`, so the data is not
+    removed by an uninstall — but that is the design, not a measurement.
 - [ ] Ordinary uninstall preserves personal data.
-  - Not yet (M6).
+  - **Not exercised.** The installer is configured with
+    `deleteAppDataOnUninstall: false`, so an ordinary uninstall leaves the
+    app's data in place. This is the configuration, not a measurement.
 - [x] Operations guide and license inventory are included.
-  - Licence inventory: `vendor/minimax-bot/LICENSE` (upstream MIT, preserved
-    unmodified) and `vendor/minimax-bot/UPSTREAM.md`.
-  - The operations guide (`docs/operations.md`) is **not yet written**; it is an
-    M6 deliverable and this row is therefore only partially satisfied.
-- [ ] Installer path, SHA-256, signing status, tested environment, and commit are recorded.
-  - Not yet (M6).
+  - Licence inventory: `docs/LICENSES.md`, with
+    `vendor/minimax-bot/LICENSE` (upstream MIT, preserved unmodified) and
+    `vendor/minimax-bot/UPSTREAM.md`.
+  - The operations guide is `docs/operations.md`.
+- [x] Installer path, SHA-256, signing status, tested environment, and commit are recorded.
+  - Recorded in `docs/runtime-validation.md` §13, `docs/operations.md` and
+    `release/SHA256SUMS.txt`, which is written in the format `sha256sum`
+    understands.
 
 ## Final evidence
 
 | Item | Result |
 |---|---|
-| Application commit | M5 — see the git history for the milestone commits |
+| Application commit | M6 — see the git history for the milestone commits |
 | Electron / embedded Node | **45.1.0**, embedded Node **v24.22.1**, ABI 150 |
 | Pi package | **1.4.0**, exports verified (32/32 Node, 10/10 Electron utility process) |
 | Windows version tested | Windows 11 x64, `DESKTOP-V2KHC9K`, Node v24.22.1 |
-| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 29/29. `npm run test:smoke` → 32/32. `npm run test:smoke:shell` → 21/21. `scripts/desktop-tests.mjs` → 22/22 |
+| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 29/29. `npm run test:smoke:shell` → 21/21. `scripts/desktop-tests.mjs` → 22/22. `npm run verify:package` → see `package-verification-report.txt` |
 | Provider test report | **UNTESTED** — `npm run test:providers` ran and reported UNTESTED for all four providers, with the reason ("no key is configured"). Not a pass |
-| Installer path | Not built |
-| Installer SHA-256 | Not built |
-| Signing status | Not built |
-| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§13 |
+| Installer path | `release/MiniBots-Setup-0.1.0-x64.exe` |
+| Installer SHA-256 | `release/SHA256SUMS.txt` — written by the packaging run |
+| Signing status | **Unsigned.** `signAndEditExecutable: false`, because `rcedit` needs Developer Mode or administrator rights. The installer and the Start menu entry carry the app's icon; the executable keeps Electron's own |
+| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§14 |
