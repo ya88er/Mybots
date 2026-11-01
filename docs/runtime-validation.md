@@ -309,12 +309,101 @@ than guessed:
 
 ---
 
-## 10. What is still unverified
+## 10. The adapter — M1 findings
+
+Everything in this section was observed by running the adapter against Pi's
+**real** agent loop through a deterministic provider fixture
+(`tests/fixtures/fixture-provider.ts`). The fixture replaces the network call
+only: the real session manager, the real tool execution and the real event
+stream all run.
+
+### `ModelRuntime.create` has no `agentDir`
+
+The installed declaration (`dist/core/model-runtime.d.ts:4-26`) accepts
+`credentials`, `authPath`, `modelsPath`, `modelsStore`, `allowModelNetwork`,
+`modelRefreshTimeoutMs`, `catalogBaseUrl` and `minOAuthValidityMs`. There is
+no `agentDir`, and `refreshOnCreate` does not exist either — the flag is
+`allowModelNetwork`, and it defaults to `false`.
+
+The adapter therefore creates the runtime with an in-memory credential store
+and `modelsPath: null`, so no plaintext auth file and no model catalogue file
+is written:
+
+```ts
+const credentials = new InMemoryCredentialStore();
+const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
+```
+
+### A provider must be *stored* to count as configured
+
+`runtime.getAuth(model)` resolves a key through the provider's own
+`auth.apiKey.resolve()`, but `runtime.hasConfiguredAuth(providerId)` reads a
+different thing: it is true only when the **credential store** holds a key.
+Pi's `prompt()` checks `hasConfiguredAuth` and refuses with *"No API key found
+for the selected model"* when it is false — even though `getAuth` would have
+returned a working key.
+
+Observed directly:
+
+```
+registered ids = minibots-fixture
+hasConfiguredAuth = false
+getAuth(model) = {"auth":{"apiKey":"fixture-key","headers":{}}}
+```
+
+The adapter's `#ensureCredential` therefore resolves the key and writes it into
+the in-memory store with `setRuntimeApiKey`. Nothing reaches a plaintext file.
+
+### `message_end` fires for every message, not only the assistant's
+
+Pi ends the system message, the user message and the assistant message alike.
+Observed event order for one prompt:
+
+```
+message_start | role = system
+message_end   | role = system
+message_start | role = user
+message_end   | role = user
+message_start | role = assistant
+message_end   | role = assistant
+```
+
+Committing every `message_end` would echo the user's own words back as the
+Bot's reply. The event mapper commits **assistant messages only**.
+
+### The abort signal does reach the provider
+
+`agent.abort()` aborts the run's `AbortController`, and that signal is what
+the provider receives in its stream options. Observed:
+
+```
+streamSimple() got signal = yes
+seenSignal.aborted before abort = false
+seenSignal.aborted after abort  = true
+```
+
+A real provider fails the request when it is aborted — pi-ai's own providers
+throw `"Request was aborted"`. The fixture does the same, because a stream
+that ends silently leaves Pi's run unsettled and `session.abort()` never
+returns.
+
+### The conversation history lives in the context, not in the prompt
+
+The fixture records the last user message per call, so the history is not in
+the prompt string. It is in the context Pi sends:
+
+```
+context 0: roles = system, user
+context 1: roles = system, user, assistant, user
+```
+
+---
+
+## 11. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|
 | DeepSeek / MiniMax / OpenAI real file task | **UNTESTED** | no provider key configured |
-| Questionnaire pause/resume through Pi | not yet exercised | needs the adapter |
-| MCP server call, failure, reconnect | not yet exercised | needs the adapter |
+| MCP server call, failure, reconnect | not yet exercised | needs the tool dispatch layer (M3) |
 | Packaged build loading Pi's runtime assets | not yet exercised | M6 |
-| Native process-tree cancellation | not yet exercised | needs the adapter |
+| Native process-tree cancellation | not yet exercised | needs the tool dispatch layer (M3) |

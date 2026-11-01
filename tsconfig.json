@@ -18,8 +18,10 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.mjs"],
-  "exclude": ["node_modules", "dist", "release", "vendor/minimax-bot/tests"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist", "release", "vendor/minimax-bot"]
 }

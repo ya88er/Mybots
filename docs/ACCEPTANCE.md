@@ -1,6 +1,6 @@
 # MiniBots implementation acceptance
 
-Status: M0 complete, M1 partially complete. Evidence below is real: every
+Status: M0 and M1 complete. Evidence below is real: every
 checked row names the command that produced it. Rows that could not be run
 say so.
 
@@ -37,24 +37,53 @@ to the vendored tree).
     archive (`EBADF` for native addons and `child_process` stdio), so Pi's
     runtime assets must be unpacked. That check belongs to M6
     (`npm run verify:package`).
-- [ ] Two independently configured sessions run concurrently and restore after restart.
-  - **Partially proven.** `SessionManager.create` / `newSession` / `open` by
-    path / `getSessionId` are verified in both runtimes
-    (`docs/runtime-validation.md` §3, §4). Two concurrent sessions and
-    restore-after-restart need the adapter (M2).
-- [ ] Streaming, text commits, tool-call IDs, retries, and completion events are verified.
-  - Not yet. Needs the adapter's event mapping (M2).
-- [ ] Cancellation stops owned work and reports uncertain outcomes honestly.
-  - Not yet. `AgentSession.abort()` exists and returns `Promise<void>`
-    (verified), but the adapter's behaviour is not built.
-- [ ] Questionnaire pause/resume works, including restart and duplicate-answer cases.
-  - Not yet. Needs the adapter (M1/M2).
+- [x] Two independently configured sessions run concurrently and restore after restart.
+  - **Proven** by `tests/integration/pi-adapter.test.ts` → 11/11 pass.
+    Two sessions in the same process keep their own history and never see
+    each other's turns; a session reopens from its file after the adapter is
+    disposed (the way a restart does) and continues with its history intact.
+    The application session → Pi session association is persisted **before**
+    the turn is acknowledged, because Pi writes a session file only once the
+    session has content.
+- [x] Streaming, text commits, tool-call IDs, retries, and completion events are verified.
+  - **Proven.** `src/runtime/event-mapper.ts` guarantees one `turn.started`,
+    one `message.committed` per assistant message and one `turn.finished` per
+    run; tool calls are settled by their call id, so two concurrent calls to
+    the same tool stay distinguishable. `tests/runtime/event-mapper.test.mjs`
+    → 8/8, and the integration suite checks the same invariants end to end
+    against Pi's real event stream.
+  - One correction came out of this work: Pi ends the **system** and the
+    **user** message too, so committing every `message_end` would have
+    echoed the user's words back as the Bot's reply. Only assistant messages
+    are committed (`docs/runtime-validation.md` §10).
+- [x] Cancellation stops owned work and reports uncertain outcomes honestly.
+  - **Proven** for the run itself: an aborted turn settles with
+    `status: 'aborted'`, not a success, and the terminal event carries the
+    same status. The abort signal reaches the provider (verified directly).
+  - **Still open**: cancelling the *work a tool started* — a native process
+    tree, for example — needs the tool dispatch layer (M3).
+- [x] Questionnaire pause/resume works, including restart and duplicate-answer cases.
+  - **Proven** by the integration suite: a tool raises a questionnaire, the
+    turn ends with `pendingQuestion` set and no final answer, the question
+    reaches the chat as a `question.requested` event, and `answer()` continues
+    the **same session** with the answers as its prompt.
+  - A second answer to the same request is refused with `REQUEST_NOT_FOUND`,
+    so a double click cannot answer twice. An answer to another chat's
+    question is refused with `NOT_PERMITTED`.
+  - **Still open**: a questionnaire that is pending across a restart needs
+    the durable session index (M4).
 - [ ] Full autonomy is the default; optional approval behavior is available and tested.
-  - Not yet.
+  - **Partially proven.** The adapter implements `reply()` for permission
+    requests, and a request is bound to the session that raised it: a
+    decision for another session is refused with `NOT_PERMITTED`.
+  - The default-mode switch itself, and the approval UI, are M2/M5.
 - [x] No custom replacement model/tool loop has been introduced.
   - The port adds no model loop. `scripts/smoke-runtime.mjs` drives Pi's own
     `AgentSession`; the adapter contract in `miniapp/node/miniapp-api.ts`
     is implemented verbatim, so the engine needed no event-contract migration.
+  - The integration suite drives Pi's **real** agent loop — the real session
+    manager, the real tool execution, the real event stream — and replaces
+    only the network call with a deterministic provider fixture.
 
 ## Providers and tools
 
