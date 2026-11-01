@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { start as startMiniApp } from './upstream-miniapp.ts';import { DispatchingAgent, withCaller, type CallerIdentity } from '../runtime/dispatching-agent.ts';
 import { PiAdapter, type BoundTool } from '../runtime/pi-adapter.ts';
 import { SessionRegistry } from '../runtime/session-registry.ts';
+import { ToolDispatch, type UpstreamDispatch } from '../tools/tool-dispatch.ts';
 
 export interface BackendOptions {
   /** Where the app keeps its state (the Mini App's data dir). */
@@ -94,15 +95,6 @@ export async function startBackend(options: BackendOptions): Promise<{
   await mkdir(options.agentDir, { recursive: true });
 
   const sessions = new SessionRegistry();
-  const adapter = new PiAdapter({
-    agentDir: options.agentDir,
-    sessionDir: options.sessionDir,
-    sessions,
-    ...(options.credential ? { credential: options.credential } : {}),
-    ...(options.tools ? { tools: options.tools } : {}),
-  });
-
-  const agent = new DispatchingAgent({ adapter });
 
   // The abort signal shuts the whole backend down: the upstream server
   // listens for it and disposes itself.
@@ -123,6 +115,48 @@ export async function startBackend(options: BackendOptions): Promise<{
     throw new Error('No free loopback port was available for the backend.');
   }
 
+  // The tool dispatch only exists once the Mini App has started, and the
+  // Mini App needs the agent, and the agent needs the adapter's tools. The
+  // way out is that the adapter resolves its tools **lazily**, at the moment
+  // a session is created — by which time the dispatch exists.
+  let upstreamDispatch: UpstreamDispatch | undefined;
+
+  const tools = new ToolDispatch({
+    // Resolved on demand; see above.
+    dispatch: {
+      definitions: () => upstreamDispatch?.definitions() ?? [],
+      names: () => upstreamDispatch?.names() ?? [],
+      call: (name, args, options) => {
+        if (!upstreamDispatch) throw new Error('The MiniBots tools are not ready yet.');
+        return upstreamDispatch.call(name, args, options);
+      },
+      failureText: (error, name) =>
+        upstreamDispatch?.failureText(error, name) ?? 'The tool failed.',
+    },
+    // The caller is the session's own Bot. The model's field never decides.
+    resolveCaller: (sessionId) => {
+      const association = sessions.get(sessionId);
+      if (!association) return undefined;
+      return {
+        id: association.botId,
+        chatId: association.chatId,
+        sessionId: association.id,
+        runId: association.id,
+      };
+    },
+    log,
+  });
+
+  const adapter = new PiAdapter({
+    agentDir: options.agentDir,
+    sessionDir: options.sessionDir,
+    sessions,
+    ...(options.credential ? { credential: options.credential } : {}),
+    tools: () => tools.tools(),
+  });
+
+  const agent = new DispatchingAgent({ adapter });
+
   const lifecycle = await startMiniApp({
     pluginId: 'minimax-bot',
     pluginRoot,
@@ -133,7 +167,13 @@ export async function startBackend(options: BackendOptions): Promise<{
     agent,
   });
 
-  log('info', 'minibots.backend_listening', { port });
+  upstreamDispatch = lifecycle.dispatch as UpstreamDispatch | undefined;
+  if (!upstreamDispatch) {
+    controller.abort();
+    throw new Error('The Mini App did not expose its tool dispatch.');
+  }
+
+  log('info', 'minibots.backend_listening', { port, tools: upstreamDispatch.names().length });
 
   const stop = async (): Promise<void> => {
     controller.abort();

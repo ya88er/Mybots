@@ -350,6 +350,47 @@ const toSelection = (m) => ({
 export function createMcpHandler({ team, engine }) {
   const store = team.store;
 
+  /**
+   * The tool dispatch, exposed so another transport can call the same handlers.
+   *
+   * The MiniBots Windows app registers these tools as Pi custom tools and
+   * keeps the Streamable HTTP MCP endpoint as a second transport over the
+   * *same* handlers, so the two can never drift apart.
+   *
+   * `caller` is the Bot the call runs for. It is bound by the caller of this
+   * function, never by the model: a model must not gain another Bot's
+   * authority by naming it in its arguments. A model-supplied
+   * `caller_bot_id` is still accepted for the HTTP transport, where the
+   * caller is authenticated by the transport's own credentials.
+   */
+  const dispatch = {
+    /** The tool definitions, in the current language. */
+    definitions: () => toolDefs(),
+    /** The tool names this dispatch accepts. */
+    names: () => [...TOOL_NAMES],
+    /**
+     * Call one tool.
+     *
+     * @param {string} name
+     * @param {Record<string, unknown>} args
+     * @param {{ caller?: any, signal?: AbortSignal }} [options]
+     * @returns {Promise<unknown>}
+     */
+    call: async (name, args, options = {}) => {
+      if (!TOOL_NAMES.includes(name)) {
+        throw new EngineError('unknown_tool', t('mcp.err.unknownTool', { name }));
+      }
+      // The bound caller wins. The model-supplied field is only a fallback
+      // for the HTTP transport, which authenticates its caller itself.
+      const merged = options.caller
+        ? { ...args, caller_bot_id: options.caller.id }
+        : args;
+      return callTool(name, merged, options.signal);
+    },
+    /** The text a failed tool call shows the model. */
+    failureText: (error, name) => failureText(error, name),
+  };
+
   function resolveCaller(args) {
     const id = args?.caller_bot_id;
     if (!id) return undefined;
@@ -716,7 +757,7 @@ export function createMcpHandler({ team, engine }) {
    * @param {import('node:http').ServerResponse} response
    * @param {unknown} body
    */
-  return async function handleMcp(request, response, body) {
+  const handleMcp = async function handleMcp(request, response, body) {
     if (request.method === 'GET') {
       response.writeHead(405, { allow: 'POST' }).end();
       return;
@@ -764,4 +805,11 @@ export function createMcpHandler({ team, engine }) {
       }
     } finally { clearInterval(heartbeat); }
   };
+
+  // The dispatch is attached to the handler, so a Host that owns the plugin
+  // can offer the same tools over another transport — the Windows app
+  // registers them as Pi custom tools this way.
+  handleMcp.dispatch = dispatch;
+
+  return handleMcp;
 }

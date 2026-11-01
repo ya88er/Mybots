@@ -116,13 +116,52 @@ fail 0` every time. Before it, the same suite showed the
 
 ---
 
-## 5. What was NOT changed
+## 5. The tool dispatch exposed to another transport
+
+**`miniapp/node/mcp.mjs`** and **`miniapp/node/server.mjs`**
+
+`createMcpHandler` gained a `dispatch` object, and the handler it returns
+carries it as a property. The lifecycle `server.mjs` returns carries it too.
+
+```js
+dispatch = {
+  definitions: () => toolDefs(),
+  names: () => [...TOOL_NAMES],
+  call: async (name, args, options = {}) => { /* ... */ },
+  failureText: (error, name) => failureText(error, name),
+};
+```
+
+**Why.** The implementation plan requires the 21 MiniBots business tools to be
+registered as Pi custom tools **and** to keep the Streamable HTTP MCP
+endpoint as another transport over the *same* handlers: "Avoid duplicated
+implementations." The handlers were already in one place, but they were
+reachable only through the HTTP request handler, so a second transport would
+have had to reimplement them.
+
+**What did not change.** The HTTP endpoint's own behaviour is untouched: it
+still authenticates its caller through the transport's credentials and still
+accepts a model-supplied `caller_bot_id`. The `dispatch.call` path takes the
+caller as an *option*, and the Windows app binds it from the runtime — the
+model's own field is removed before the call, so a model cannot borrow
+another Bot's authority by naming it.
+
+**No upstream test was changed, and none needed to be.** The upstream suite
+still passes 343/343.
+
+---
+
+## 6. What was NOT changed
 
 - The engine's business logic: groups, relay guards, group notes, memory
   selection, helper admission, schedules, usage metering.
 - The client UI, its layout, its 11 looks, and its artwork.
 - The `MiniAppAgentRunEvent` / `MiniAppAgentRunResult` contract: the adapter
   implements it verbatim instead of the engine migrating to a new shape.
+- The MCP protocol's own behaviour: the HTTP endpoint's request handling,
+  its session handling, its schema validation and its error reporting are
+  unchanged. Only the dispatch was exposed, so a second transport can share
+  the handlers.
 - Every upstream test file's assertions and its test bodies. Only the
   `helper-usage` cleanup hook was changed, and only in the way described above.
 

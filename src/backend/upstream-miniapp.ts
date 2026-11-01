@@ -75,6 +75,26 @@ export interface MiniAppContext {
 /** The lifecycle the upstream Mini App returns. */
 export interface MiniAppLifecycle {
   dispose(): void | Promise<void>;
+  /**
+   * The MiniBots business tools, as a dispatch.
+   *
+   * It is exposed so a Host can offer the same tools over another transport
+   * — the Windows app registers them as Pi custom tools this way — while the
+   * Streamable HTTP MCP endpoint keeps using the same handlers.
+   */
+  dispatch?: MiniAppToolDispatch;
+}
+
+/** The tool dispatch the upstream Mini App exposes. */
+export interface MiniAppToolDispatch {
+  definitions(): Array<{ name: string; description: string; inputSchema: unknown }>;
+  names(): string[];
+  call(
+    name: string,
+    args: Record<string, unknown>,
+    options?: { caller?: unknown; signal?: AbortSignal },
+  ): Promise<unknown>;
+  failureText(error: unknown, name: string): string;
 }
 
 /**

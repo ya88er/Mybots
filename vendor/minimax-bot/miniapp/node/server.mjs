@@ -737,5 +737,9 @@ export async function start(context) {
   const onAbort = () => void dispose();
   context.signal.addEventListener('abort', onAbort, { once: true });
   if (context.signal.aborted) await dispose();
-  return { dispose };
+  // The tool dispatch is exposed so a Host can offer the same tools over
+  // another transport. The Windows app registers them as Pi custom tools
+  // this way, and the Streamable HTTP endpoint keeps using the same
+  // handlers.
+  return { dispose, dispatch: handleMcp.dispatch };
 }

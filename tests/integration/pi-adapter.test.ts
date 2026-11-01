@@ -430,3 +430,54 @@ test('the provider catalogue lists only configured providers', async (t) => {
   assert.equal(catalog.models.length, 0);
   assert.equal(catalog.default, undefined);
 });
+
+test('a MiniBots business tool runs through Pi\'s real tool loop', async (t) => {
+  // The tool is registered the way the backend registers it: as a Pi custom
+  // tool whose closure carries the session's identity.
+  const calls: Array<{ args: Record<string, unknown>; context: unknown }> = [];
+  const tool: BoundTool = {
+    name: 'mcp__minimax-bot__list_team',
+    description: 'List the team.',
+    parameters: { type: 'object', properties: {} },
+    execute: async (args, context) => {
+      calls.push({ args, context });
+      return { content: JSON.stringify({ members: ['Chief'] }) };
+    },
+  };
+
+  const h = await harness(
+    t,
+    [
+      {
+        toolCalls: [
+          { id: 'call_1', name: 'mcp__minimax-bot__list_team', arguments: {} },
+        ],
+      },
+      { text: 'The team is Chief.' },
+    ],
+    { tools: [tool] },
+  );
+
+  const { events, result } = await run(h, 'Who is on the team?', {
+    botId: 'bot1',
+    chatId: 'chat1',
+  });
+
+  assert.equal(calls.length, 1, 'the tool ran exactly once');
+  const context = calls[0]?.context as { botId: string; chatId: string };
+  assert.equal(context.botId, 'bot1', 'the session identity was bound');
+  assert.equal(context.chatId, 'chat1');
+
+  // The tool's result went back to the model, and the model answered from it.
+  assert.equal(result.status, 'finished');
+  assert.match(result.text ?? '', /The team is Chief\./);
+
+  // The tool call is visible in the event stream, by its canonical name.
+  const started = events.filter((e) => e.type === 'tool.started');
+  assert.equal(started.length, 1);
+  assert.equal(
+    started[0]?.type === 'tool.started' ? started[0].name : '',
+    'mcp__minimax-bot__list_team',
+    "the UI's canonical label is preserved",
+  );
+});
