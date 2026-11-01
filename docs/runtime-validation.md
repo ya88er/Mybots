@@ -399,7 +399,79 @@ context 1: roles = system, user, assistant, user
 
 ---
 
-## 11. What is still unverified
+## 11. The Electron shell — M2 findings
+
+### Electron on Windows does not write to the console
+
+A GUI Electron application on Windows has no console attached, so
+`console.log` goes nowhere. This was found by a smoke test that appeared to
+hang with no output: the application was working, and the output was simply
+invisible.
+
+The shell smoke test therefore writes its report to a file and exits with a
+status code. `scripts/smoke-electron-shell.mjs` → **10/10 checks passed**:
+the window is created, the real vendored client loads, the preload bridge is
+installed, the renderer never sees a bearer token, the backend becomes ready,
+and the renderer reaches the backend only through the main process.
+
+### `app.getAppPath()` is the *script's* directory
+
+When Electron is launched with a script path, `app.getAppPath()` is that
+script's directory — not the app's root. The app resolves its own root from
+its module location instead (`appRoot()` in `src/main/main.ts`), so the paths
+are the same however the app was started.
+
+### The upstream server does not report its port
+
+`server.mjs` creates its own `http.Server`, binds it and returns only
+`{ dispose }`. The host therefore reserves a free loopback port first — by
+binding a probe socket to port 0, reading the port the OS chose and releasing
+it — and hands that port to the upstream server through `context.listen`.
+
+### The upstream routing cannot be extended
+
+`server.mjs` builds its routes in a local closure, so the app cannot add a
+route without changing a vendored file. The app's own routes — the session
+inspector at `/api/app/sessions` — are therefore served by the **gate**, in
+front of the upstream server, where the app owns the code. They are behind the
+same bearer token as everything else.
+
+### The upstream client is served by the upstream server
+
+`server.mjs` serves the client itself at `/bot` from
+`miniapp/client`, reading it from `context.pluginRoot`. The window therefore
+loads that page, and the whole upstream UI comes with it — no rewrite into
+React, no second copy of the client.
+
+### The identity the upstream contract has no room for
+
+The upstream engine holds **one** agent client and calls it for every Bot,
+chat and helper, and `MiniAppAgentClient` carries no caller identity. The
+MiniBots tools must nevertheless run with the real caller's authority.
+
+The identity therefore travels out of band, in an `AsyncLocalStorage` context
+that the backend sets around every call into the engine
+(`src/runtime/dispatching-agent.ts`). The model never sees it, and the engine
+needed no change. `AsyncLocalStorage` keeps concurrent turns apart, because
+each turn's context is its own async branch.
+
+### `safeStorage` in Electron 45
+
+The synchronous `safeStorage` methods are deprecated and removed in Electron
+46, and the async API returns an **object**:
+
+- `encryptStringAsync(plain)` resolves to `{ result: Buffer }`;
+- `decryptStringAsync(cipher)` resolves to `{ result: string }`.
+
+`src/main/credential-service.ts` normalises both shapes and prefers the async
+API. `tests/integration/credential-service.test.ts` proves the async path is
+the one used (8/8 pass), that a saved key is not readable in plain text from
+the file, that a removed key is gone from the file, and that a file which
+cannot be decrypted is *reported* rather than silently ignored.
+
+---
+
+## 12. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|

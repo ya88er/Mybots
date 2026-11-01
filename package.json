@@ -21,6 +21,7 @@
     "test:providers": "node scripts/test-providers.mjs",
     "test:smoke": "node scripts/smoke-runtime.mjs",
     "test:smoke:electron": "electron scripts/smoke-electron-main.mjs",
+    "test:smoke:shell": "electron scripts/smoke-electron-shell.mjs",
     "dist:win": "npm run build && electron-builder --win --x64 --config electron-builder.yml",
     "verify:package": "node scripts/verify-package.mjs",
     "verify:upstream": "node scripts/verify-upstream.mjs"

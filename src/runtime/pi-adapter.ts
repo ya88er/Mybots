@@ -71,6 +71,17 @@ export interface ModelCatalog {
   readonly default?: ModelCatalogEntry;
 }
 
+/**
+ * The questionnaire the upstream contract expects.
+ *
+ * It is the same shape the event mapper carries, so the request a tool
+ * raises and the request the engine renders can never drift apart.
+ */
+export type AgentQuestionnaire = import('./event-mapper.ts').AgentQuestionnaire;
+
+/** The JSON values the upstream contract allows. */
+export type JsonValue = import('./event-mapper.ts').JsonValue;
+
 /** The upstream result shape, mirrored so the adapter does not import the Mini App. */
 export interface AgentRunResult {
   readonly sessionId: string;
@@ -81,7 +92,7 @@ export interface AgentRunResult {
   readonly pendingQuestion?: {
     readonly requestId: string;
     readonly mode: 'questionnaire' | 'feature-enable' | 'plan';
-    readonly request: unknown;
+    readonly request: AgentQuestionnaire;
   };
 }
 
@@ -185,7 +196,7 @@ interface LiveSession {
   pendingQuestion?: {
     requestId: string;
     mode: 'questionnaire' | 'feature-enable' | 'plan';
-    request: unknown;
+    request: AgentQuestionnaire;
   };
 }
 
@@ -346,7 +357,7 @@ export class PiAdapter {
   async requestQuestion(input: {
     readonly sessionId: string;
     readonly mode: 'questionnaire' | 'feature-enable' | 'plan';
-    readonly request: unknown;
+    readonly request: AgentQuestionnaire;
   }): Promise<{ readonly requestId: string }> {
     const association = this.#options.sessions.get(input.sessionId);
     if (!association) {

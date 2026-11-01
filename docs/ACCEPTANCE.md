@@ -1,6 +1,6 @@
 # MiniBots implementation acceptance
 
-Status: M0 and M1 complete. Evidence below is real: every
+Status: M0, M1 and M2 complete. Evidence below is real: every
 checked row names the command that produced it. Rows that could not be run
 say so.
 
@@ -30,13 +30,14 @@ to the vendored tree).
     `createMcpExtension`, `createPowerShellTool`, `defineTool`, `loadSkills`.
   - Evidence: `docs/runtime-validation.md` §2, §3, §6.
 - [ ] Runtime runs inside the packaged Windows app without an external Node or Pi CLI install.
-  - **Partially proven.** The Pi SDK loads and runs inside the Electron
-    **utility process**, which is the process the backend uses
-    (`npm run test:smoke:electron` → 10/10). The *packaged* build is not
-    verified yet: Electron 45 restricts file descriptors inside an ASAR
-    archive (`EBADF` for native addons and `child_process` stdio), so Pi's
-    runtime assets must be unpacked. That check belongs to M6
-    (`npm run verify:package`).
+  - **Partially proven.** The whole application now runs on Electron:
+    `npm run test:smoke:shell` → **10/10 checks passed**. It launches the
+    real main process, the real utility process and a real window; the window
+    loads the real vendored client; the backend is the real upstream Mini App.
+  - The *packaged* build is not verified yet: Electron 45 restricts file
+    descriptors inside an ASAR archive (`EBADF` for native addons and
+    `child_process` stdio), so Pi's runtime assets must be unpacked. That
+    check belongs to M6 (`npm run verify:package`).
 - [x] Two independently configured sessions run concurrently and restore after restart.
   - **Proven** by `tests/integration/pi-adapter.test.ts` → 11/11 pass.
     Two sessions in the same process keep their own history and never see
@@ -107,18 +108,52 @@ to the vendored tree).
     intact.
 - [ ] Provider errors do not silently change models or replay completed side effects.
   - Not yet.
-- [ ] API keys are encrypted at rest and absent from normal logs/exports/Pi plaintext auth.
-  - **Partially proven.** `npm run test:smoke` asserts that no plaintext
-    `sk-…` key appears in the Pi auth file after a session runs
-    (`docs/runtime-validation.md` §6). The `safeStorage` encryption path is
-    not built yet (M2), and Electron 45's `safeStorage` synchronous methods
-    are deprecated in favour of the async API, which returns an object rather
-    than a string.
+- [x] API keys are encrypted at rest and absent from normal logs/exports/Pi plaintext auth.
+  - **Proven** by `tests/integration/credential-service.test.ts` → **8/8 pass**:
+    a saved key is not readable in plain text from the file on disk; the
+    Electron 45 **async** `safeStorage` API is the one used (the deprecated
+    synchronous one is not called); a removed key is gone from the file; a
+    file that cannot be decrypted is *reported*, not silently ignored; and a
+    system with no OS key store refuses to store a key at all.
+  - The key never leaves the main process: the renderer submits it through a
+    dedicated preload method, the main process encrypts it and stores only the
+    ciphertext, and the backend receives the resolved key over the utility
+    process's private IPC. The renderer is told **which** providers are
+    configured, never the key.
+  - Pi receives the key through its in-memory runtime credential API, so no
+    plaintext Pi auth file is written (`npm run test:smoke` asserts this).
+  - The loopback is authenticated: a request without the bearer token is
+    refused with 401 and never reaches the upstream server
+    (`tests/integration/backend-gate.test.ts` → 6/6 pass).
 - [x] Native Windows PowerShell works; missing optional Bash is handled.
   - `createPowerShellTool` constructs successfully in both the Node and the
     Electron utility-process smoke tests. Git Bash was located at
     `C:\Program Files\Git\bin\bash.exe` and its absence is reported as an
     optional prerequisite rather than a failure.
+- [x] The desktop shell runs the upstream Mini App unmodified, behind an authenticated loopback.
+  - **Proven** by `npm run test:smoke:shell` → **10/10 checks passed** and
+    `tests/integration/backend-host.test.ts` → **8/8 pass**.
+  - The upstream `server.mjs` is started unmodified with a real context: the
+    real engine, the real stores, the real scheduler and the real tasks. It
+    serves the upstream client at `/bot`, so the whole upstream UI comes with
+    it — the frontend was not rewritten and no second copy exists.
+  - The upstream server binds a reserved ephemeral loopback port. The app's
+    **gate** listens on its own ephemeral port, checks a bearer token in
+    constant time, and forwards only authenticated requests. A request without
+    the token is refused with 401 and never reaches the upstream server.
+  - The renderer has no route to the backend at all: it asks the main process
+    over IPC, and the main process adds the token. The shell smoke test
+    asserts that the renderer sees no credential.
+  - The gate binds the loopback interface only, and a test asserts that it is
+    not reachable on the machine's LAN address.
+  - The app's own routes — the session inspector at `/api/app/sessions` — are
+    served by the gate, because the upstream server's routing is a closure
+    that cannot be extended without changing a vendored file.
+  - The backend survives a restart with its state intact, and releases its
+    port cleanly on shutdown.
+  - The caller's identity travels out of band in an `AsyncLocalStorage`
+    context, so the tools a model calls run with the real caller's authority
+    while the model never sees it.
 - [ ] All 22 original MiniBots business tools retain their expected behavior.
   - **Inventory verified.** All 22 tool names are present in
     `miniapp/node/mcp.mjs` (20 declared literally, plus `get_tasks` and

@@ -15,9 +15,45 @@
  * - exactly one `turn.finished` per run.
  */
 
+/** The JSON values the upstream contract allows. */
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+/**
+ * The questionnaire a `question.requested` event carries.
+ *
+ * It mirrors the upstream `MiniAppAgentQuestionnaire`, so the adapter does
+ * not depend on the vendored Mini App.
+ */
+export interface AgentQuestionnaire {
+  readonly schemaVersion: 2;
+  readonly id: string;
+  readonly title?: string;
+  readonly steps: ReadonlyArray<{
+    readonly id: string;
+    readonly header?: string;
+    readonly question: string;
+    readonly description?: string;
+    readonly selectionMode: 'single' | 'multiple';
+    readonly options: ReadonlyArray<{
+      readonly id: string;
+      readonly label: string;
+      readonly description?: string;
+    }>;
+    readonly allowOther: true;
+  }>;
+  readonly mode?: 'questionnaire' | 'feature-enable' | 'plan';
+  readonly modePayload?: { readonly [key: string]: JsonValue };
+  readonly expiresAt?: number;
+}
+
 /** The upstream event union, mirrored so the adapter does not import the Mini App. */
-export type MappedEvent =
-  | { type: 'turn.started'; sessionId: string; turnId: string }
+export type MappedEvent =  | { type: 'turn.started'; sessionId: string; turnId: string }
   | { type: 'text.delta'; sessionId: string; turnId: string; text: string }
   | { type: 'message.committed'; sessionId: string; turnId: string; text: string }
   | { type: 'tool.started'; sessionId: string; turnId: string; name: string }
@@ -37,7 +73,7 @@ export type MappedEvent =
       turnId?: string;
       requestId: string;
       mode: 'questionnaire' | 'feature-enable' | 'plan';
-      request: unknown;
+      request: AgentQuestionnaire;
     }
   | {
       type: 'turn.finished';
@@ -244,7 +280,11 @@ export class EventMapper {
   }
 
   /** Emit a pending questionnaire. */
-  question(requestId: string, mode: 'questionnaire' | 'feature-enable' | 'plan', request: unknown): void {
+  question(
+    requestId: string,
+    mode: 'questionnaire' | 'feature-enable' | 'plan',
+    request: AgentQuestionnaire,
+  ): void {
     this.#options.emit({
       type: 'question.requested',
       sessionId: this.#options.sessionId,
