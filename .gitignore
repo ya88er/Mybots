@@ -33,3 +33,7 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Scratch commit-message files (written to disk because PowerShell mangles
+# double quotes in `git commit -m`)
+.git-commit-*.txt
