@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+vendor/minimax-bot/tests/node_modules/
+
+# Build output
+dist/
+release/
+out/
+*.tsbuildinfo
+
+# Electron runtime caches
+.vite/
+.cache/
+
+# Secrets and credentials — never commit these
+*.env
+*.env.*
+!.env.example
+credentials.enc.json
+*.key
+*.pem
+auth.json
+
+# Personal application data (the app stores state under Electron userData, but
+# never let a local copy leak into the repo)
+userData/
+*.log
+logs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

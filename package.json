@@ -1,0 +1,36 @@
+{
+  "name": "minibots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MiniBots — a standalone Windows desktop app for multi-bot AI collaboration, built on the Pi coding-agent SDK.",
+  "type": "module",
+  "main": "dist/main.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:upstream": "node scripts/run-upstream-tests.mjs",
+    "test:runtime": "node --test \"tests/runtime/**/*.test.mjs\"",
+    "test:integration": "node --test \"tests/integration/**/*.test.mjs\"",
+    "test:desktop": "node --test \"tests/desktop/**/*.test.mjs\"",
+    "test:providers": "node scripts/test-providers.mjs",
+    "test:smoke": "node scripts/smoke-runtime.mjs",
+    "test:smoke:electron": "electron scripts/smoke-electron-main.mjs",
+    "dist:win": "npm run build && electron-builder --win --x64 --config electron-builder.yml",
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify:upstream": "node scripts/verify-upstream.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "electron": "45.1.0",
+    "electron-builder": "26.0.12",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0"
+  }
+}
