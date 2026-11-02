@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     // same code path the application does.
     const projectRoot = resolve(here, '..');
     const entry = resolve(projectRoot, 'dist', 'main', 'main.js');
-    await import(`file://${entry.replace(/\\/g, '/')}`);
+    const main = await import(`file://${entry.replace(/\\/g, '/')}`);
 
     // The window appears.
     const windowAppeared = await until(() => BrowserWindow.getAllWindows().length > 0);
@@ -190,8 +190,13 @@ app.whenReady().then(async () => {
 
     // ---------------------------------------------------------------------
     // The app's own window.
+    //
+    // It is opened the way a user opens it: through the **tray's** settings
+    // item. That is the only route to the provider settings in the shipped
+    // app, so it is the one that has to work.
     // ---------------------------------------------------------------------
-    await window.webContents.executeJavaScript('window.minibots.openAppWindow()');
+    check('the app can open its own window', typeof main.openSettings === 'function');
+    main.openSettings();
     const appWindowAppeared = await until(
       () =>
         BrowserWindow.getAllWindows().some(
@@ -227,6 +232,41 @@ app.whenReady().then(async () => {
         'window.minibots.listProviders().then((r) => r.providers.length)',
       );
       check('the app offers its providers', providers === 4, `providers: ${providers}`);
+
+      // The providers section is the one that is open, and each provider has
+      // a field to paste the key into. This is the surface the user is
+      // actually here for, so it is checked rather than assumed.
+      //
+      // The cards are rendered after the window's own data has loaded, so
+      // the check **waits** for them rather than probing once and reporting
+      // a race.
+      const keyFieldsReady = await until(async () => {
+        const probe = await appWindow.webContents.executeJavaScript(
+          'document.querySelectorAll(\'input[id^="key-"]\').length',
+        );
+        return probe === 4;
+      }, 30_000);
+      check(
+        'the providers section has a key field for every provider',
+        keyFieldsReady,
+        'key fields: 4',
+      );
+
+      const keyFields = await appWindow.webContents.executeJavaScript(`
+        (() => {
+          const inputs = [...document.querySelectorAll('input[id^="key-"]')];
+          return JSON.stringify({
+            inputs: inputs.length,
+            hasSave: [...document.querySelectorAll('button')].some((b) =>
+              /save/i.test(b.textContent || ''),
+            ),
+            visible: inputs.length > 0 && inputs[0].offsetParent !== null,
+          });
+        })()
+      `);
+      const keyState = JSON.parse(String(keyFields));
+      check('the key field is visible', keyState.visible === true, 'the user can paste a key');
+      check('the providers section has a save button', keyState.hasSave === true);
 
       const credentials = await appWindow.webContents.executeJavaScript(
         'window.minibots.listCredentials().then((r) => JSON.stringify(r))',

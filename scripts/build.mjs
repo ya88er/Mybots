@@ -139,7 +139,7 @@ function writeDistPackageJson() {
 
 /** Copy the app's own pages next to the app. */
 function copyAppUi() {
-  const source = join(root, 'src', 'app-ui');
+  const source = join(root, 'src', 'app');
   const target = join(dist, 'app');
   if (!existsSync(source)) {
     throw new Error('The app\'s own pages were not found.');

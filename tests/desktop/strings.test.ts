@@ -11,7 +11,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import strings from '../../src/app-ui/strings.js';
+import strings from '../../src/app/strings.js';
 
 /** The placeholders a string uses. */
 function placeholders(value: string): string[] {
@@ -92,9 +92,36 @@ test('the app owns a string for every user-facing surface', () => {
     'nav.sessions',
     'nav.dispatches',
     'nav.about',
+    // The tray menu belongs to the main process, but its strings live in
+    // this table: the main process reads them from here, so the tray and the
+    // app's own window can never drift apart.
+    'tray.open',
+    'tray.settings',
+    'tray.startAtLogin',
+    'tray.quit',
+    'tray.tooltip',
   ];
   for (const key of required) {
     assert.ok(strings.en[key], `en.${key} exists`);
     assert.ok(strings.zh[key], `zh.${key} exists`);
+  }
+});
+
+test('the tray menu is labelled, and each item says what it does', () => {
+  // A tray menu whose items are all named after the app is a menu nobody can
+  // use. The labels are checked here rather than in the Electron suite, so a
+  // regression is caught without starting a window server.
+  const labels = ['tray.open', 'tray.settings', 'tray.startAtLogin', 'tray.quit'];
+  for (const language of ['en', 'zh']) {
+    const table = strings[language as 'en' | 'zh'];
+    const values = labels.map((key) => table[key] ?? '');
+    assert.equal(
+      new Set(values).size,
+      labels.length,
+      `${language}: the tray items must not all carry the same label`,
+    );
+    for (const value of values) {
+      assert.ok(value.trim().length > 0, `${language}: a tray label is empty`);
+    }
   }
 });

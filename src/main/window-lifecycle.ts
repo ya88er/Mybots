@@ -10,7 +10,8 @@
  * The rules this module keeps:
  *
  * - closing the window **hides** it; it does not quit the app;
- * - the tray menu has exactly three items — open, start at sign-in, quit;
+ * - the tray menu has exactly four items — open, settings, start at sign-in,
+ *   quit;
  * - quitting stops the backend with a **bounded** wait, so a hung tool can
  *   never leave a zombie process behind;
  * - the "quit" is always the user's explicit choice, never a side effect.
@@ -34,6 +35,13 @@ export interface TrayController {
   readonly menu: Electron.Menu | undefined;
   /** Update the "start at sign-in" item's checked state. */
   setStartAtLogin: (enabled: boolean) => void;
+  /**
+   * Change the menu's language.
+   *
+   * The menu is rebuilt with the new labels, because Electron's menu items
+   * are immutable once a menu is built.
+   */
+  setLabels: (labels: TrayLabels) => void;
   /** The menu's items, by id, for the tests. */
   item: (id: string) => Electron.MenuItem | undefined;
   /**
@@ -150,24 +158,48 @@ function trayImage(): Electron.NativeImage {
 }
 
 /**
+ * The tray menu's labels.
+ *
+ * The labels are the **user's language**, so they are passed in rather than
+ * hard-coded here: the main process resolves the locale and hands over the
+ * strings it wants the menu to show.
+ */
+export interface TrayLabels {
+  /** The menu's title line. */
+  readonly tooltip: string;
+  /** The item that brings the chat window back. */
+  readonly open: string;
+  /** The item that opens the app's own window — providers and inspectors. */
+  readonly settings: string;
+  /** The item that toggles starting at sign-in. */
+  readonly startAtLogin: string;
+  /** The item that quits the app. */
+  readonly quit: string;
+}
+
+/**
  * Create the tray icon and its menu.
  *
- * The menu is rebuilt whenever the sign-in item's state changes, because
- * Electron's menu items are immutable once a menu is built.
+ * The menu is rebuilt whenever the sign-in item's state changes, or the
+ * language changes, because Electron's menu items are immutable once a menu
+ * is built.
  */
 export function createTray(options: {
   /** Show the window. */
   onShow: () => void;
+  /** Open the app's own window: the provider settings and the inspectors. */
+  onOpenSettings: () => void;
   /** Toggle starting at sign-in. */
   onToggleStartAtLogin: (enabled: boolean) => void;
   /** Whether the app starts at sign-in right now. */
   isStartAtLoginEnabled: () => boolean;
   /** Quit the app. */
   onQuit: () => void;
-  /** The tray's tooltip. */
-  tooltip: string;
+  /** The menu's labels, in the user's language. */
+  labels: TrayLabels;
 }): TrayController {
   let startAtLogin = options.isStartAtLoginEnabled();
+  let labels = options.labels;
   /** The menu that is currently shown. */
   let current: Electron.Menu | undefined;
 
@@ -182,16 +214,21 @@ export function createTray(options: {
 
   const build = (): Electron.Menu => {
     const template: Electron.MenuItemConstructorOptions[] = [
-      { label: options.tooltip, enabled: false },
+      { label: labels.tooltip, enabled: false },
       { type: 'separator' },
       {
         id: 'show',
-        label: options.tooltip,
+        label: labels.open,
         click: () => actions.get('show')?.(),
       },
       {
+        id: 'settings',
+        label: labels.settings,
+        click: () => actions.get('settings')?.(),
+      },
+      {
         id: 'start-at-login',
-        label: options.tooltip,
+        label: labels.startAtLogin,
         type: 'checkbox',
         checked: startAtLogin,
         click: (item) => {
@@ -207,7 +244,7 @@ export function createTray(options: {
       { type: 'separator' },
       {
         id: 'quit',
-        label: options.tooltip,
+        label: labels.quit,
         click: () => actions.get('quit')?.(),
       },
     ];
@@ -215,11 +252,12 @@ export function createTray(options: {
   };
 
   actions.set('show', () => options.onShow());
+  actions.set('settings', () => options.onOpenSettings());
   actions.set('start-at-login', (enabled) => options.onToggleStartAtLogin(enabled === true));
   actions.set('quit', () => options.onQuit());
 
   const tray = new Tray(trayImage());
-  tray.setToolTip(options.tooltip);
+  tray.setToolTip(labels.tooltip);
   current = build();
   tray.setContextMenu(current);
   tray.on('click', () => options.onShow());
@@ -232,6 +270,19 @@ export function createTray(options: {
     show: () => options.onShow(),
     setStartAtLogin: (enabled: boolean) => {
       startAtLogin = enabled;
+      current = build();
+      tray.setContextMenu(current);
+    },
+    /**
+     * Change the menu's language.
+     *
+     * The app's own window can switch language, and the tray follows: the
+     * menu is rebuilt, because Electron's menu items are immutable once a
+     * menu is built.
+     */
+    setLabels: (next: TrayLabels) => {
+      labels = next;
+      tray.setToolTip(next.tooltip);
       current = build();
       tray.setContextMenu(current);
     },

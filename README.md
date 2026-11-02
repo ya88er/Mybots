@@ -33,7 +33,8 @@ collaboration layer. **No replacement model or tool loop is implemented here.**
 - A durable dispatch ledger, a durable session index, and a schedule catch-up
   record survive a restart.
 - A tray icon, a window that hides instead of closing, and a start-at-sign-in
-  preference.
+  preference. The tray's **Settings…** item opens the app's own window, where
+  the provider keys are entered.
 - **A per-user Windows installer**, and the **packaged app** is verified by
   running it: the window appears, the client renders with its stylesheet, the
   backend answers, and the page's own API calls are authenticated
@@ -139,7 +140,7 @@ src/                     the new desktop, backend and runtime code
   backend/               the utility process, the authenticated loopback, the app's routes
   runtime/               the Pi adapter, the session index, the dispatch ledger
   tools/                 the MiniBots business tools as Pi custom tools
-  app-ui/                the app's own window: provider settings and the inspectors
+  app/                   the app's own window: provider settings and the inspectors
 tests/                   new tests for the port
 scripts/                 build, verify and smoke-test tooling
 docs/                    plan, acceptance report, runtime validation, operations guide

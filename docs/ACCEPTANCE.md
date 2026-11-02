@@ -362,10 +362,22 @@ Partially complete.
     (`tsconfig.build.json`), the preload as CommonJS, and the backend's shim
     as CommonJS. All four pass.
   - `tests/runtime/` → **17/17**. `tests/integration/` → **54/54**.
-    `tests/desktop/` → **29/29**.
-  - `scripts/desktop-tests.mjs` → **22/22 checks passed** (the tray and the
+    `tests/desktop/` → **30/30**.
+  - `scripts/desktop-tests.mjs` → **30/30 checks passed** (the tray and the
     window's lifecycle, inside a real Electron process).
-  - `scripts/smoke-electron-shell.mjs` → **21/21 checks passed**.
+  - `scripts/smoke-electron-shell.mjs` → **25/25 checks passed**.
+- [x] The user can enter a provider key.
+  - **Proven.** The app's own window — the provider settings — is opened by
+    the tray's **Settings…** item, and it shows four visible key fields and a
+    Save button. Both the shell smoke test and the **packaged** self-check
+    drive that path, the same function the tray item calls.
+  - The tray's items are labelled in the user's language and follow a change
+    of language.
+  - This was **not** true before the M6 review: the app shipped with no way
+    to reach the provider settings at all. The upstream client's avatar opens
+    the Mini App's own settings, and the upstream client is preserved
+    byte-for-byte. The whole suite was green while this was broken.
+  - Full detail: `docs/runtime-validation.md` §13.
 - [x] Packaged assets, native modules, and Pi resources are present and load successfully.
   - **Proven** by `npm run verify:package`, which inspects the **built**
     artifact rather than the source tree, and then launches it.
@@ -384,7 +396,7 @@ Partially complete.
     stylesheet and its module script**, the backend answers, and the page's
     own relative fetch is authenticated.
   - Four packaging defects were found this way and fixed; the detail is in
-    `docs/runtime-validation.md` §13.
+    `docs/runtime-validation.md` §14.
 - [ ] Installer tested under paths containing spaces and Unicode.
   - **Partially proven.** The installer is a per-user NSIS installer that
     lets the user choose the folder, so a path with spaces and Unicode is
@@ -426,7 +438,7 @@ Partially complete.
     `vendor/minimax-bot/UPSTREAM.md`.
   - The operations guide is `docs/operations.md`.
 - [x] Installer path, SHA-256, signing status, tested environment, and commit are recorded.
-  - Recorded in `docs/runtime-validation.md` §13, `docs/operations.md` and
+  - Recorded in `docs/runtime-validation.md` §14, `docs/operations.md` and
     `release/SHA256SUMS.txt`, which is written in the format `sha256sum`
     understands.
 
@@ -438,9 +450,9 @@ Partially complete.
 | Electron / embedded Node | **45.1.0**, embedded Node **v24.22.1**, ABI 150 |
 | Pi package | **1.4.0**, exports verified (32/32 Node, 10/10 Electron utility process) |
 | Windows version tested | Windows 11 x64, `DESKTOP-V2KHC9K`, Node v24.22.1 |
-| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 29/29. `npm run test:smoke:shell` → 21/21. `scripts/desktop-tests.mjs` → 22/22. `npm run verify:package` → see `package-verification-report.txt` |
+| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 30/30. `npm run test:smoke:shell` → 25/25. `scripts/desktop-tests.mjs` → 30/30. `npm run verify:package` → 34/34 |
 | Provider test report | **UNTESTED** — `npm run test:providers` ran and reported UNTESTED for all four providers, with the reason ("no key is configured"). Not a pass |
 | Installer path | `release/MiniBots-Setup-0.1.0-x64.exe` |
 | Installer SHA-256 | `release/SHA256SUMS.txt` — written by the packaging run |
 | Signing status | **Unsigned.** `signAndEditExecutable: false`, because `rcedit` needs Developer Mode or administrator rights. The installer and the Start menu entry carry the app's icon; the executable keeps Electron's own |
-| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§14 |
+| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§15 |

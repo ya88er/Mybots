@@ -40,7 +40,7 @@ export function appUiDir(): string {
   // packaged build they are copied into `dist/app`.
   const beside = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'app');
   if (existsSync(join(beside, 'index.html'))) return beside;
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'app-ui');
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'app');
 }
 
 /** A file the app serves, and its content type. */

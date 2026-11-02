@@ -52,10 +52,12 @@ MiniBots talks to a model provider using **your own API key**. Nothing is
 sent to a MiniBots server — there is no such server — and the key never
 leaves your machine in readable form.
 
-1. Open the app's own window. From the chat window, the **avatar at the
-   bottom of the left rail** opens it; it is also reachable from the tray.
-2. Choose **Providers**.
-3. Pick a provider, paste the key, and press **Save**.
+1. Open the app's own window. From the **tray icon** in the notification area,
+   choose **Settings…**. (Right-click the tray icon; the item is between
+   "Open MiniBots" and "Start at sign-in".)
+2. The **Providers** section is the one that opens.
+3. Pick a provider, paste the key into its **API key** field, and press
+   **Save**.
 
 | Provider | Where to get the key |
 |---|---|
@@ -137,7 +139,9 @@ starts when you sign in to Windows.
 |---|---|
 | Close the window | The window **hides**. The app keeps running in the tray. |
 | Click the tray icon | The window comes back. |
-| **Quit** in the tray menu | The app stops completely. |
+| **Settings…** in the tray menu | The app's own window opens: providers, sessions, dispatches. |
+| **Start at sign-in** in the tray menu | Ticks or unticks the preference. |
+| **Quit MiniBots** in the tray menu | The app stops completely. |
 
 The quit is the only way to stop the app. It stops the backend with a bounded
 wait, so a stuck tool cannot leave a stray process behind.

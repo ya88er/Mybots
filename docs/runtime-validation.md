@@ -604,10 +604,10 @@ means the same checker covers it.
 |---|---|---|
 | Types | `npm run typecheck` | 4/4 configurations pass |
 | Runtime | `npm run test:runtime` | 17/17 |
-| Desktop | `npm run test:desktop` | 29/29 |
+| Desktop | `npm run test:desktop` | 30/30 |
 | Integration | `npm run test:integration` | 54/54 |
 | Upstream | `npm run test:upstream` | 343/343 |
-| Shell | `npm run test:smoke:shell` | **21/21 checks passed** |
+| Shell | `npm run test:smoke:shell` | **25/25 checks passed** |
 
 The shell smoke test now proves the origin fix end to end: the page is served
 from `http://127.0.0.1:<port>/bot`, the client's stylesheet loaded
@@ -617,7 +617,94 @@ and closing the window hides it instead of quitting.
 
 ---
 
-## 13. The Windows release — M6 findings
+## 13. The tray — a defect found by asking how a key is entered
+
+The app ships with an app-owned window that holds the provider settings, the
+session inspector and the dispatch inspector. It works: the packaged
+self-check opens it, it renders, and it lists the four providers.
+
+And nothing could reach it.
+
+The upstream client's avatar at the bottom of the rail opens the **Mini
+App's own** settings — the upstream overlay, not MiniBots' provider
+settings. The upstream client is preserved byte-for-byte
+(`client files changed: 0`), so there is nothing in it that knows MiniBots
+exists. The preload bridge exposed `openAppWindow()`, but the only caller
+was the **self-check** — in normal use, no one called it.
+
+So the app shipped with **no way to enter an API key**. The engine, the
+bots, the groups, the schedules and the memory all worked; the model calls
+could not, because no key could ever be entered.
+
+### The strings were in the wrong process
+
+The tray's labels — "Open MiniBots", "Start at sign-in", "Quit MiniBots" —
+were already written, in English and Chinese, in the app's own string table.
+They were never shown:
+
+- the table lives in the **renderer**, at `src/app/strings.js`, and the
+  renderer never reads the tray keys;
+- the **main process** builds the tray, and it could not reach that table;
+- so every menu item fell back to the app's own tooltip, and the menu read
+  `MiniBots / MiniBots / MiniBots`.
+
+The fix puts the table where both processes can use it. The app's own
+window's folder moved from `src/app-ui/` to `src/app/` — the same name as
+the route it serves — and the main process imports it as `../app/strings.js`.
+That specifier resolves in the development build (`dist/app/strings.js`) and
+in the archive (`app.asar/dist/app/strings.js`) alike.
+
+### The tray is the way in
+
+The tray menu now has four items, each labelled with what it does, in the
+user's language:
+
+```
+Open MiniBots
+Settings…
+☐ Start at sign-in
+─────────────
+Quit MiniBots
+```
+
+**Settings…** opens the app's own window — the provider settings. The tray
+follows the app's language: changing it in the app's own window rebuilds the
+menu, because Electron's menu items are immutable once a menu is built.
+
+### The shell smoke test drives the user's path
+
+The smoke test used to open the app's window through the preload bridge —
+the bridge is not how a user reaches it. It now calls the same function the
+tray's item calls, and it checks that the window really shows **four visible
+key fields and a Save button**: the surface the user is there for.
+
+### A check that waits, because a check that races is not a check
+
+The first version of that check probed the window **once**, and read the
+provider cards straight away. The cards are rendered after the window's own
+data has loaded, so the check passed or failed depending on the machine's
+mood: one run reported four key fields, the next reported zero.
+
+A check that is right by luck is not a check. Both the smoke test and the
+packaged self-check now **wait** for the cards, and the packaged verification
+is run five times in a row
+(`scripts/verify-package-repeatedly.ps1`) — five runs, five passes.
+
+### What this cost
+
+The suite was green throughout: 4/4 type checks, 17/17, 30/30, 54/54,
+343/343 upstream, 22/22 → 30/30 Electron, 21/21 → 25/25 shell, 34/34
+package. **Every one of them passed while the app had no way to enter an
+API key.**
+
+The lesson is not about the tray. It is that a green suite proves the code
+does what it was written to do, and it says nothing about whether the user
+can reach the thing they need. The question "how does a user add their API
+key?" was asked of the finished app, and the answer was "there is no way".
+
+---
+
+## 14. The Windows release — M6 findings
 
 ### The ASAR packager's unpack list must stay short
 
@@ -908,17 +995,17 @@ It confirms, against the built artifact:
 |---|---|---|
 | Types | `npm run typecheck` | 4/4 configurations pass |
 | Runtime | `npm run test:runtime` | 17/17 |
-| Desktop | `npm run test:desktop` | 29/29 |
+| Desktop | `npm run test:desktop` | 30/30 |
 | Integration | `npm run test:integration` | 54/54 |
 | Upstream | `npm run test:upstream` | 343/343 |
-| Electron desktop | `scripts/desktop-tests.mjs` | **22/22 checks passed** |
-| Shell | `npm run test:smoke:shell` | **21/21 checks passed** |
+| Electron desktop | `scripts/desktop-tests.mjs` | **30/30 checks passed** |
+| Shell | `npm run test:smoke:shell` | **25/25 checks passed** |
 | Package | `npm run verify:package` | **34/34 checks passed** |
 | Providers | `npm run test:providers` | **UNTESTED** — no key configured |
 
 ---
 
-## 14. What is still unverified
+## 15. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|

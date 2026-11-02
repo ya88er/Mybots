@@ -21,6 +21,7 @@ export default {
     'app.window.inspector': 'MiniBots — Inspector',
 
     'tray.open': 'Open MiniBots',
+    'tray.settings': 'Settings…',
     'tray.startAtLogin': 'Start at sign-in',
     'tray.quit': 'Quit MiniBots',
     'tray.tooltip': 'MiniBots',
@@ -115,6 +116,7 @@ export default {
     'app.window.inspector': 'MiniBots — 检查器',
 
     'tray.open': '打开 MiniBots',
+    'tray.settings': '设置…',
     'tray.startAtLogin': '开机自动启动',
     'tray.quit': '退出 MiniBots',
     'tray.tooltip': 'MiniBots',

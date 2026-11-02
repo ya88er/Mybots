@@ -24,6 +24,7 @@ import { CredentialService } from './credential-service.ts';
 import { SettingsStore } from './app-settings.ts';
 import { PROVIDERS } from './providers.ts';
 import { log, trace, traceError, useLogDirectory } from './app-log.ts';
+import strings from '../app/strings.js';
 import {
   agentDir,
   appRoot,
@@ -40,6 +41,7 @@ import {
   installWindowLifecycle,
   trayIconPath,
   type TrayController,
+  type TrayLabels,
   type WindowController,
 } from './window-lifecycle.ts';
 
@@ -251,6 +253,21 @@ function createWindow(): void {
   });
 
   void mainWindow.loadURL(clientUrl());
+}
+
+/**
+ * Open the app's own window.
+ *
+ * It holds the provider settings and the two inspectors. It is a separate
+ * window so that the chat stays exactly the upstream Mini App — the frontend
+ * was not rewritten.
+ *
+ * This is the way the **tray's** "Settings" item reaches the window, and it
+ * is exported so that the shell smoke test can drive the same path a user
+ * drives.
+ */
+export function openSettings(): void {
+  createAppWindow();
 }
 
 /**
@@ -494,6 +511,9 @@ function registerIpc(): void {
   ipcMain.handle('minibots:app:locale', async (_event, request: { locale: string }) => {
     const locale = request.locale === 'en' || request.locale === 'zh' ? request.locale : 'auto';
     await settings?.update({ locale });
+    // The tray speaks the same language, so it is rebuilt with the new
+    // labels.
+    tray?.setLabels(trayLabels());
     return { locale: resolveLocale() };
   });
 
@@ -569,6 +589,25 @@ async function quit(): Promise<void> {
   app.quit();
 }
 
+/**
+ * The tray menu's labels, in the user's language.
+ *
+ * The strings live in the app's own string table — the same table the app's
+ * own window uses — so the tray and the window can never drift apart, and a
+ * new language is one table rather than two.
+ */
+function trayLabels(): TrayLabels {
+  const locale = resolveLocale();
+  const table = strings[locale];
+  return {
+    tooltip: table['tray.tooltip'] ?? 'MiniBots',
+    open: table['tray.open'] ?? 'Open MiniBots',
+    settings: table['tray.settings'] ?? 'Settings…',
+    startAtLogin: table['tray.startAtLogin'] ?? 'Start at sign-in',
+    quit: table['tray.quit'] ?? 'Quit MiniBots',
+  };
+}
+
 /** Create the tray icon. */
 function installTray(): void {
   tray = createTray({
@@ -576,12 +615,15 @@ function installTray(): void {
       if (mainWindow && !mainWindow.isDestroyed()) windowController?.show();
       else createWindow();
     },
+    // The app's own window is where the provider keys are entered, so the
+    // tray is how the user reaches it.
+    onOpenSettings: () => openSettings(),
     onToggleStartAtLogin: (enabled) => {
       void applyStartAtLogin(enabled);
     },
     isStartAtLoginEnabled: () => settings?.current.startAtLogin === true,
     onQuit: () => void quit(),
-    tooltip: 'MiniBots',
+    labels: trayLabels(),
   });
 }
 
@@ -750,7 +792,10 @@ async function runSelfCheck(reportPath: string): Promise<void> {
     check('the page can fetch the API with a relative path', fetched === true);
 
     // The app's own window: the provider settings and the inspectors.
-    await window.webContents.executeJavaScript('window.minibots.openAppWindow()');
+    //
+    // It is opened the way a user opens it — through the function the tray's
+    // "Settings…" item calls — so the check proves the path the user has.
+    openSettings();
     const appWindowAppeared = await until(
       () =>
         BrowserWindow.getAllWindows().some((candidate) =>
@@ -764,6 +809,44 @@ async function runSelfCheck(reportPath: string): Promise<void> {
       'window.minibots.listProviders().then((r) => r.providers.length)',
     );
     check('the app offers its providers', providers === 4, `providers: ${providers}`);
+
+    // The key field itself. This is the surface the user comes here for, so
+    // the packaged app proves it is there and visible — not merely that the
+    // window opened.
+    const appWindow = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.webContents.getURL().endsWith('/app'),
+    );
+    if (appWindow) {
+      // The provider cards are rendered after the window's own data has
+      // loaded, so the check **waits** for them rather than probing once and
+      // reporting a race.
+      const keyFieldsReady = await until(async () => {
+        const probe = await appWindow.webContents.executeJavaScript(
+          'document.querySelectorAll(\'input[id^="key-"]\').length',
+        );
+        return probe === 4;
+      }, 30_000);
+      check(
+        'the providers section has a key field for every provider',
+        keyFieldsReady,
+        'key fields: 4',
+      );
+
+      const keyState = JSON.parse(
+        String(
+          await appWindow.webContents.executeJavaScript(`
+            (() => {
+              const inputs = [...document.querySelectorAll('input[id^="key-"]')];
+              return JSON.stringify({
+                count: inputs.length,
+                visible: inputs.length > 0 && inputs[0].offsetParent !== null,
+              });
+            })()
+          `),
+        ),
+      );
+      check('the key field is visible', keyState.visible === true, 'a key can be pasted');
+    }
 
     // The tray's icon. A packaged build keeps the icon inside the archive,
     // so this is the check that the icon is really there and really loads.
