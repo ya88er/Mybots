@@ -388,11 +388,20 @@ Partially complete.
   - The check leaves **no key behind**: the removal is part of the check and
     the final state is asserted empty, so a fake key can never linger in the
     user's credential store.
+  - The page is **readable**, not merely functional. The packaged app was
+    launched and photographed **from inside its own process**, and the first
+    photograph showed the key field overlapping the provider's description and
+    the description squeezed to one word per line. No test could have caught
+    that — the DOM was correct and every button worked. The row now stacks
+    (name and description on their own line, the controls below), the key
+    field is width-constrained, and every label carries
+    `white-space: nowrap`. The fix is inline styles on the page's own
+    elements, so upstream's stylesheet is untouched.
   - This required **one documented change to the upstream client** — three
     files, and the verification fails if any *other* client file changes.
     The upstream's own layout, artwork and behaviour are untouched, and the
     upstream suite still passes **343/343**.
-  - Full detail: `docs/runtime-validation.md` §13 and §15, and
+  - Full detail: `docs/runtime-validation.md` §13, §15 and §16, and
     `vendor/minimax-bot/MODIFICATIONS.md` §7.
 - [x] Packaged assets, native modules, and Pi resources are present and load successfully.
   - **Proven** by `npm run verify:package`, which inspects the **built**
@@ -471,4 +480,4 @@ Partially complete.
 | Installer path | `release/MiniBots-Setup-0.1.0-x64.exe` |
 | Installer SHA-256 | `release/SHA256SUMS.txt` — written by the packaging run |
 | Signing status | **Unsigned.** `signAndEditExecutable: false`, because `rcedit` needs Developer Mode or administrator rights. The installer and the Start menu entry carry the app's icon; the executable keeps Electron's own |
-| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§16 |
+| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§17 |

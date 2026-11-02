@@ -224,6 +224,21 @@ behaviour is unchanged in that case.
 its artwork. The section uses the upstream's own components and its own
 styling; the only new thing is one icon path (`plug`) in the icon set.
 
+**The row's layout.** The section's rows are laid out with **inline styles on
+the page's own elements**, so upstream's stylesheet is not touched and no
+upstream rule can be broken for any other page. The row stacks: the
+provider's name and description take a full line, and the key field, the
+buttons and the status sit on the line below. The key field is
+`flex: 1 1 240px` with a `max-width` of 360px, the buttons and the status
+label are `flex: 0 0 auto`, and every label carries `white-space: nowrap`.
+
+That layout was not the first one tried. The first attempt put everything on
+one horizontal line, and the **packaged app's own photograph of the page**
+showed the key field overlapping the description and the description
+squeezed to one word per line. No test could have caught it: the DOM was
+correct and every button worked — the page was simply unreadable. The fix
+followed that photograph.
+
 **Strings.** Ten new keys, in both English and Chinese.
 
 **That the Save button works.** The packaged app's own self-check types a probe

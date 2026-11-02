@@ -1126,7 +1126,65 @@ provider key is configured on this machine, so the four live-provider rows in
 
 ---
 
-## 16. What is still unverified
+## 16. M6.4 — a layout defect found by looking at the artifact
+
+Every check so far asked a question about **behaviour**: does the page render,
+does the key save, does the key come back out. None of them asked what the
+page **looks like**. So the packaged app was launched and photographed, from
+inside its own process — a second Electron instance is a separate program and
+cannot see this one's windows, so the app takes its own picture.
+
+The picture showed a **broken layout**.
+
+Each provider row was laid out as one horizontal line: the provider's name and
+description on the left, then the key field, three buttons and a status label
+on the right. The upstream's own `.row` class was used for the controls, and
+that class carries `width: 100%` and a hover background — it is a *button*
+style, not a container for form controls.
+
+The result:
+
+- the key field **overlapped** the description text;
+- the description was squeezed into a column about four characters wide, so
+  "DeepSeek chat and reasoning models." wrapped to one word per line;
+- the "Test connection" label broke across two lines.
+
+Nothing in the test suite could have caught this. The DOM was correct, the
+buttons worked, the key saved — the page was simply unreadable.
+
+### Why it happened
+
+`.set-row` is a flex row whose first child is `.grow` (`flex: 1; min-width: 0`).
+The `.grow` child *can* shrink, but only if the other side is allowed to
+shrink too. The controls sat in a `.row` with `width: 100%` and no width
+constraint of its own, and the `input` inside it has `width: 100%` from
+upstream's `.input` rule. The input's intrinsic width therefore won, and the
+description collapsed to nothing rather than the controls giving way.
+
+### The fix
+
+The row now **stacks**: the provider's name and description take the full
+width on their own line, and the controls sit on the line below, in a
+wrapping flex row where the key field is `flex: 1 1 240px` with a `max-width`
+of 360px, the buttons and the status label are `flex: 0 0 auto`, and every
+label carries `white-space: nowrap`.
+
+The fix is **inline styles on the page's own elements**, following the
+upstream's own convention — upstream's CSS file is **not** touched, so the
+allow-list stays at three client files and no upstream rule can be broken for
+any other page.
+
+The page was then photographed again. The description reads on one line, the
+key field is a sensible width, and the buttons and the status label stay on
+one line each.
+
+**What this proves that the tests could not:** that the shipped app is
+*readable*. The behaviour checks prove the page works; only a photograph
+proves it can be used.
+
+---
+
+## 17. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|

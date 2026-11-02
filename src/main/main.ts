@@ -694,6 +694,129 @@ async function bootstrap(): Promise<void> {
   if (reportPath) {
     await runSelfCheck(reportPath);
   }
+
+  // The capture mode: open the Providers section and photograph it.
+  //
+  // A screenshot of the packaged app can only be taken **inside** the app's
+  // own process — a second Electron instance is a separate program and cannot
+  // see this one's windows. So the app takes its own picture.
+  //
+  // It is only ever run when the environment names a file, so a normal launch
+  // never takes this path.
+  const capturePath = process.env.MINIBOTS_CAPTURE;
+  if (capturePath) {
+    await runCapture(capturePath);
+  }
+}
+
+/**
+ * Open the Providers section and photograph it.
+ *
+ * It drives the **real** page: the avatar is clicked, the settings sidebar
+ * opens, the Providers section is chosen, and the picture is taken of what is
+ * actually on screen.
+ */
+async function runCapture(capturePath: string): Promise<void> {
+  try {
+    const appeared = await waitFor(() => BrowserWindow.getAllWindows().length > 0);
+    if (!appeared) throw new Error('no window appeared');
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) throw new Error('no window');
+
+    // Wait for the client to have rendered, or the picture shows an empty page.
+    await waitFor(
+      () => !window.webContents.isLoading() && window.webContents.getURL().startsWith('http://127.0.0.1:'),
+    );
+    await waitFor(async () => {
+      const rendered = await window.webContents.executeJavaScript(
+        "Boolean(document.querySelector('.set-nav') || document.querySelector('.client') || document.body)",
+      );
+      return rendered === true;
+    });
+    await sleep(1500);
+
+    // The avatar opens the Mini App's own settings, and the sidebar's
+    // Providers section is what this photograph is of.
+    //
+    // The settings panel is a modal overlay, so the click has to land on the
+    // avatar *and* the overlay has to appear before the sidebar can be read.
+    await waitFor(async () => {
+      const opened = await window.webContents.executeJavaScript(
+        `(() => {
+          // The upstream's own avatar button, at the bottom of the left rail.
+          const avatar = document.getElementById('me-btn');
+          if (!avatar) return false;
+          avatar.click();
+          return true;
+        })()`,
+      );
+      if (opened !== true) return false;
+      const nav = await window.webContents.executeJavaScript(
+        "Boolean(document.querySelector('.set-nav'))",
+      );
+      return nav === true;
+    });
+    await sleep(800);
+
+    // Choose the Providers section, and wait for its cards to arrive.
+    await waitFor(async () => {
+      const clicked = await window.webContents.executeJavaScript(
+        `(() => {
+          const nav = document.querySelector('.set-nav');
+          if (!nav) return false;
+          const button = [...nav.querySelectorAll('button')].find((b) =>
+            /provider/i.test(b.textContent || ''),
+          );
+          if (!button) return false;
+          button.click();
+          return true;
+        })()`,
+      );
+      return clicked === true;
+    });
+    // The provider cards render after the page's data arrives.
+    await waitFor(async () => {
+      const fields = await window.webContents.executeJavaScript(
+        `(() => {
+          const main = document.querySelector('.set-main');
+          if (!main) return -1;
+          return main.querySelectorAll('input.input[type="password"]').length;
+        })()`,
+      );
+      return fields === 4;
+    });
+    await sleep(800);
+
+    const image = await window.webContents.capturePage();
+    writeFileSync(capturePath, image.toPNG());
+    appendFileSync(capturePath.replace(/\.png$/, '.txt'), `captured ${capturePath}\n`, 'utf8');
+  } catch (error) {
+    appendFileSync(
+      capturePath.replace(/\.png$/, '.txt'),
+      `FAILED ${error instanceof Error ? error.stack : String(error)}\n`,
+      'utf8',
+    );
+  } finally {
+    app.exit(0);
+  }
+}
+
+/** Wait for a condition, up to a timeout. */
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 60_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+/** Wait a moment. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

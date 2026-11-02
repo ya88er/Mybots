@@ -1312,12 +1312,12 @@ function providersPage(body) {
     group.replaceChildren();
     for (const provider of providers.providers) {
       const input = /** @type {HTMLInputElement} */ (
-        h('input', { class: 'input', type: 'password', placeholder: configured.has(provider.id) ? '••••••••' : provider.name, 'aria-label': `${provider.name} API key`, autocomplete: 'off' })
+        h('input', { class: 'input', type: 'password', placeholder: configured.has(provider.id) ? '••••••••' : provider.name, 'aria-label': `${provider.name} API key`, autocomplete: 'off', style: { width: '100%', minWidth: '0' } })
       );
-      const save = h('button', { type: 'button', class: 'soft' }, t('panels.providers.save'));
-      const remove = h('button', { type: 'button', class: 'soft' }, t('panels.providers.remove'));
-      const test = h('button', { type: 'button', class: 'soft' }, t('panels.providers.test'));
-      const state = h('span', { class: 'muted' }, configured.has(provider.id) ? t('panels.providers.configured') : t('panels.providers.notConfigured'));
+      const save = h('button', { type: 'button', class: 'soft', style: { whiteSpace: 'nowrap' } }, t('panels.providers.save'));
+      const remove = h('button', { type: 'button', class: 'soft', style: { whiteSpace: 'nowrap' } }, t('panels.providers.remove'));
+      const test = h('button', { type: 'button', class: 'soft', style: { whiteSpace: 'nowrap' } }, t('panels.providers.test'));
+      const state = h('span', { class: 'muted', style: { whiteSpace: 'nowrap', flex: '0 0 auto' } }, configured.has(provider.id) ? t('panels.providers.configured') : t('panels.providers.notConfigured'));
 
       save.addEventListener(
         'click',
@@ -1365,9 +1365,33 @@ function providersPage(body) {
       group.append(
         h(
           'div',
-          { class: 'set-row' },
+          {
+            class: 'set-row provider-row',
+            style: { flexDirection: 'column', alignItems: 'stretch', gap: '10px' },
+          },
           h('div', { class: 'grow' }, h('span', null, provider.name), h('small', null, provider.description ?? '')),
-          h('div', { class: 'row' }, input, save, remove, test, state),
+          h(
+            'div',
+            {
+              class: 'provider-controls',
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                flexWrap: 'wrap',
+                minWidth: '0',
+              },
+            },
+            h('div', { style: { flex: '1 1 240px', minWidth: '0', maxWidth: '360px' } }, input),
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 0 auto' } },
+              save,
+              remove,
+              test,
+            ),
+            state,
+          ),
         ),
       );
     }
