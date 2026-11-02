@@ -182,11 +182,61 @@ posts its note into its Bot's chat and still moves to its next slot. Only a
 
 ---
 
-## 7. What was NOT changed
+## 7. The Providers section in the settings sidebar
+
+**`miniapp/client/panels.js`**, **`miniapp/client/core.js`** and
+**`miniapp/client/strings-panels.js`**
+
+The settings sidebar gained one entry, `Providers`, between `General` and
+`Bots`. It renders a row per provider — a masked key field, **Save**,
+**Remove**, **Test connection** and a status — exactly as the upstream
+renders the other sections.
+
+```js
+const PAGES = [
+  ['general', 'panels.settings.page.general', 'sliders'],
+  ['providers', 'panels.settings.page.providers', 'plug'],
+  ...
+];
+```
+
+**Why.** The provider keys belong to the **desktop app**, not to the Mini App:
+they are encrypted with the operating system's key store and they never reach
+the upstream server. The Mini App's own settings — General, Bots, Groups,
+Memory, Tasks, Scheduled tasks, Usage — have nowhere to put them, so the
+desktop app's keys had no home in the app's own settings window. The user
+asked for the section to be there, and it is.
+
+**How the keys are read and written.** Through the desktop app's own bridge,
+`window.minibots`, which the preload exposes in the chat window too. The
+page calls `listProviders`, `listCredentials`, `saveCredential`,
+`removeCredential` and `testProvider`. **No key is ever sent over HTTP** and
+no key is ever read back: the page is told only *which* providers are
+configured, and the field it shows for a configured provider is a mask.
+
+**The Mini App on its own.** `window.minibots` is absent when the Mini App
+runs without the desktop app, so the page says so
+(`panels.providers.unavailable`) instead of failing. The upstream's own
+behaviour is unchanged in that case.
+
+**What did not change.** The upstream's `h()` helper, its `set-row` /
+`set-group` / `soft` / `muted` classes, the sidebar's layout, its icons and
+its artwork. The section uses the upstream's own components and its own
+styling; the only new thing is one icon path (`plug`) in the icon set.
+
+**Strings.** Ten new keys, in both English and Chinese.
+
+**The upstream suite still passes 343/343**, with no test modified: the
+change is entirely in the client, and the upstream's tests cover the engine.
+
+---
+
+## 8. What was NOT changed
 
 - The engine's business logic: groups, relay guards, group notes, memory
   selection, helper admission, schedules, usage metering.
-- The client UI, its layout, its 11 looks, and its artwork.
+- The client UI's **layout**, its 11 looks, and its artwork. The settings
+  sidebar gained one section, as described above; nothing else moved.
 - The `MiniAppAgentRunEvent` / `MiniAppAgentRunResult` contract: the adapter
   implements it verbatim instead of the engine migrating to a new shape.
 - The MCP protocol's own behaviour: the HTTP endpoint's request handling,

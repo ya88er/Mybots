@@ -279,6 +279,88 @@ app.whenReady().then(async () => {
     }
 
     // ---------------------------------------------------------------------
+    // The upstream settings sidebar has a **Providers** section.
+    //
+    // The sidebar the user showed is the Mini App's own settings — General,
+    // Bots, Groups, Memory, Tasks, Scheduled tasks, Usage. The Providers
+    // entry is the one that reaches the app's provider keys, so it is
+    // checked by clicking it, not by asserting that a string exists.
+    // ---------------------------------------------------------------------
+    const sidebarHasProviders = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(`
+        (() => {
+          const me = document.getElementById('me-btn');
+          if (!me) return false;
+          me.click();
+          return true;
+        })()
+      `);
+      return probe === true;
+    }, 20_000);
+    check('the settings overlay opens', sidebarHasProviders);
+
+    const providersEntry = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(`
+        (() => {
+          const nav = document.querySelector('.set-nav');
+          if (!nav) return false;
+          const button = [...nav.querySelectorAll('button')].find((b) =>
+            /provider/i.test(b.textContent || ''),
+          );
+          if (!button) return false;
+          button.click();
+          return true;
+        })()
+      `);
+      return probe === true;
+    }, 20_000);
+    check('the sidebar has a Providers section', providersEntry);
+
+    // The page renders the cards after the bridge answers, so the count is
+    // polled until it settles — and the count itself is reported, so a
+    // failure says what it found.
+    let upstreamKeyCount = -1;
+    const upstreamKeyFieldsReady = await until(async () => {
+      upstreamKeyCount = await window.webContents.executeJavaScript(`
+        (() => {
+          const main = document.querySelector('.set-main');
+          if (!main) return -1;
+          return main.querySelectorAll('input.input[type="password"]').length;
+        })()
+      `);
+      return upstreamKeyCount === 4;
+    }, 20_000);
+    check(
+      "the sidebar's Providers section has a key field for every provider",
+      upstreamKeyFieldsReady === true,
+      `key fields: ${upstreamKeyCount}`,
+    );
+
+    const upstreamSave = await window.webContents.executeJavaScript(`
+      (() => {
+        const buttons = [...document.querySelectorAll('.set-main button')];
+        return JSON.stringify({
+          save: buttons.some((b) => /save|保存/i.test(b.textContent || '')),
+          test: buttons.some((b) => /test|测试/i.test(b.textContent || '')),
+        });
+      })()
+    `);
+    const upstreamState = JSON.parse(String(upstreamSave));
+    check("the sidebar's Providers section has a save button", upstreamState.save === true);
+    check("the sidebar's Providers section has a test button", upstreamState.test === true);
+
+    // The key is never sent over the HTTP API, and the page is never shown
+    // one: the bridge only ever reports which providers are configured.
+    const upstreamCredentials = await window.webContents.executeJavaScript(
+      'window.minibots.listCredentials().then((r) => JSON.stringify(r))',
+    );
+    check(
+      "the sidebar's Providers section shows no key",
+      !String(upstreamCredentials).includes('sk-'),
+      String(upstreamCredentials),
+    );
+
+    // ---------------------------------------------------------------------
     // The tray and the window lifecycle.
     // ---------------------------------------------------------------------
     // Electron does not expose the tray list, so the tray is observed through

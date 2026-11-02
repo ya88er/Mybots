@@ -136,6 +136,7 @@ const ICONS = {
   eraser: '<path d="M4 20h16M7.5 15.5l8-8 4 4-8 8h-4z"/>',
   edit: '<path d="M4.5 19.5l1-4.2L15.8 5a1.8 1.8 0 0 1 2.6 0l.6.6a1.8 1.8 0 0 1 0 2.6L8.7 18.5z"/>',
   bot: '<rect x="4.5" y="7.5" width="15" height="11" rx="3"/><path d="M12 3.5v4M9.5 12.5h.01M14.5 12.5h.01"/>',
+  plug: '<path d="M9 3.5v5M15 3.5v5"/><path d="M6.5 8.5h11v2.2a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.2v4.3"/>',
 };
 
 /** @param {keyof typeof ICONS} name */

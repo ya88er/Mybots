@@ -848,6 +848,56 @@ async function runSelfCheck(reportPath: string): Promise<void> {
       check('the key field is visible', keyState.visible === true, 'a key can be pasted');
     }
 
+    // The Mini App's own settings sidebar has a **Providers** section. The
+    // packaged app proves it: the sidebar is opened, the section is clicked,
+    // and the key fields are counted.
+    const sidebarOpened = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(
+        `(() => {
+          const me = document.getElementById('me-btn');
+          if (!me) return false;
+          me.click();
+          return true;
+        })()`,
+      );
+      return probe === true;
+    }, 20_000);
+    check('the settings sidebar opens', sidebarOpened);
+
+    const providersClicked = await until(async () => {
+      const probe = await window.webContents.executeJavaScript(
+        `(() => {
+          const nav = document.querySelector('.set-nav');
+          if (!nav) return false;
+          const button = [...nav.querySelectorAll('button')].find((b) =>
+            /provider/i.test(b.textContent || ''),
+          );
+          if (!button) return false;
+          button.click();
+          return true;
+        })()`,
+      );
+      return probe === true;
+    }, 20_000);
+    check("the sidebar has a Providers section", providersClicked);
+
+    let sidebarKeyFields = -1;
+    const sidebarKeyFieldsReady = await until(async () => {
+      sidebarKeyFields = await window.webContents.executeJavaScript(
+        `(() => {
+          const main = document.querySelector('.set-main');
+          if (!main) return -1;
+          return main.querySelectorAll('input.input[type="password"]').length;
+        })()`,
+      );
+      return sidebarKeyFields === 4;
+    }, 20_000);
+    check(
+      "the sidebar's Providers section has a key field for every provider",
+      sidebarKeyFieldsReady === true,
+      `key fields: ${sidebarKeyFields}`,
+    );
+
     // The tray's icon. A packaged build keeps the icon inside the archive,
     // so this is the check that the icon is really there and really loads.
     const trayIcon = trayIconPath();

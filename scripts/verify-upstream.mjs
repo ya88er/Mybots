@@ -45,8 +45,30 @@ console.log('');
 console.log(`REMOVED (${removed.length}):`);
 for (const rel of removed.sort()) console.log(`  ${rel}`);
 
-// The client must be untouched: the port preserves its layout and artwork.
+// The client's own layout and artwork must be untouched. The port adds
+// **one** section to the settings sidebar — the Providers section, which
+// holds the desktop app's provider keys — and changes nothing else. Every
+// other client file must be byte-identical to the pinned upstream commit.
+//
+// The allowed changes are named here rather than counted, so a change to
+// any *other* client file fails the check.
+const CLIENT_ALLOWED = new Set([
+  'miniapp\\client\\panels.js',
+  'miniapp\\client\\core.js',
+  'miniapp\\client\\strings-panels.js',
+]);
+
 const clientChanged = modified.filter((rel) => rel.startsWith('miniapp' + String.fromCharCode(92) + 'client'));
+const clientUnexpected = clientChanged.filter((rel) => !CLIENT_ALLOWED.has(rel));
+
 console.log('');
 console.log(`client files changed: ${clientChanged.length}`);
-if (clientChanged.length) for (const rel of clientChanged) console.log(`  ${rel}`);
+for (const rel of clientChanged.sort()) console.log(`  ${rel}`);
+console.log(`client files changed unexpectedly: ${clientUnexpected.length}`);
+for (const rel of clientUnexpected.sort()) console.log(`  ${rel}`);
+
+if (clientUnexpected.length) {
+  console.error('');
+  console.error('[minibots] the client changed outside the documented Providers section.');
+  process.exit(1);
+}

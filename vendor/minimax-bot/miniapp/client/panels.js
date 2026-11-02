@@ -1203,6 +1203,7 @@ function createGroupModal() {
 /** [id, title key, icon]; titles resolve at render time. */
 const PAGES = [
   ['general', 'panels.settings.page.general', 'sliders'],
+  ['providers', 'panels.settings.page.providers', 'plug'],
   ['bots', 'panels.settings.page.bots', 'bot'],
   ['groups', 'panels.settings.page.groups', 'users'],
   ['memory', 'panels.settings.page.memory', 'memory'],
@@ -1219,7 +1220,7 @@ function settingsModal(o) {
     { class: 'set-nav', 'aria-label': t('panels.settings.title') },
     PAGES.map(([id, label, ic]) => h('button', { type: 'button', 'aria-current': id === page[0] ? 'page' : null, onclick: () => openOverlay({ ...o, page: id }) }, icon(/** @type {any} */ (ic)), t(label))),
   );
-  const content = { general: generalPage, bots: botsPage, groups: groupsPage, memory: memoryPage, tasks: tasksPage, schedules: schedulesPage, usage: usagePage }[page[0]];
+  const content = { general: generalPage, providers: providersPage, bots: botsPage, groups: groupsPage, memory: memoryPage, tasks: tasksPage, schedules: schedulesPage, usage: usagePage }[page[0]];
   content(body, o);
   return h(
     'div',
@@ -1279,8 +1280,106 @@ function generalPage(body) {
   );
 }
 
-function botsPage(body) {
+/**
+ * The providers page.
+ *
+ * The provider keys belong to the **desktop app**, not to the Mini App, so
+ * they are read and written through the app's own bridge — never over HTTP,
+ * and never through the upstream server. The key never leaves the main
+ * process: the bridge saves it there, and the page is only ever told *which*
+ * providers are configured.
+ *
+ * When the bridge is absent — the Mini App running on its own, without the
+ * desktop app — the page says so instead of failing.
+ */
+function providersPage(body) {
+  const bridge = /** @type {any} */ (window).minibots;
+  if (!bridge || typeof bridge.listProviders !== 'function') {
+    body.append(h('p', { class: 'muted' }, t('panels.providers.unavailable')));
+    return;
+  }
+
   const group = h('div', { class: 'set-group' });
+  const status = h('p', { class: 'muted' }, t('panels.providers.loading'));
+  body.append(group, status);
+
+  const refresh = async () => {
+    const [providers, credentials] = await Promise.all([
+      bridge.listProviders(),
+      bridge.listCredentials(),
+    ]);
+    const configured = new Set(credentials.providers ?? []);
+    group.replaceChildren();
+    for (const provider of providers.providers) {
+      const input = /** @type {HTMLInputElement} */ (
+        h('input', { class: 'input', type: 'password', placeholder: configured.has(provider.id) ? '••••••••' : provider.name, 'aria-label': `${provider.name} API key`, autocomplete: 'off' })
+      );
+      const save = h('button', { type: 'button', class: 'soft' }, t('panels.providers.save'));
+      const remove = h('button', { type: 'button', class: 'soft' }, t('panels.providers.remove'));
+      const test = h('button', { type: 'button', class: 'soft' }, t('panels.providers.test'));
+      const state = h('span', { class: 'muted' }, configured.has(provider.id) ? t('panels.providers.configured') : t('panels.providers.notConfigured'));
+
+      save.addEventListener(
+        'click',
+        guard(async () => {
+          const key = input.value.trim();
+          if (!key) return;
+          save.disabled = true;
+          try {
+            await bridge.saveCredential(provider.id, key);
+            input.value = '';
+            state.textContent = t('panels.providers.configured');
+          } catch (error) {
+            state.textContent = `${t('panels.providers.failed')} ${error?.message ?? ''}`.trim();
+          } finally {
+            save.disabled = false;
+          }
+        }),
+      );
+      remove.addEventListener(
+        'click',
+        guard(async () => {
+          remove.disabled = true;
+          try {
+            await bridge.removeCredential(provider.id);
+            state.textContent = t('panels.providers.notConfigured');
+          } finally {
+            remove.disabled = false;
+          }
+        }),
+      );
+      test.addEventListener(
+        'click',
+        guard(async () => {
+          test.disabled = true;
+          state.textContent = t('panels.providers.testing');
+          try {
+            const result = await bridge.testProvider(provider.id);
+            state.textContent = result?.ok ? t('panels.providers.ok') : `${t('panels.providers.failed')} ${result?.message ?? ''}`.trim();
+          } finally {
+            test.disabled = false;
+          }
+        }),
+      );
+
+      group.append(
+        h(
+          'div',
+          { class: 'set-row' },
+          h('div', { class: 'grow' }, h('span', null, provider.name), h('small', null, provider.description ?? '')),
+          h('div', { class: 'row' }, input, save, remove, test, state),
+        ),
+      );
+    }
+    status.remove();
+  };
+
+  void refresh().catch((error) => {
+    status.textContent = `${t('panels.providers.failed')} ${error?.message ?? ''}`.trim();
+  });
+}
+
+function botsPage(body) {  const group = h('div', { class: 'set-group' });
   for (const bot of state.bots) {
     const sw = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'switch', checked: bot.isMain, 'aria-label': t('panels.bots.setMain', { name: bot.name }) }));
     sw.addEventListener(

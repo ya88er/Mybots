@@ -35,6 +35,11 @@ collaboration layer. **No replacement model or tool loop is implemented here.**
 - A tray icon, a window that hides instead of closing, and a start-at-sign-in
   preference. The tray's **Settings…** item opens the app's own window, where
   the provider keys are entered.
+- A **Providers** section in the Mini App's own Settings sidebar — the one
+  with *General, Bots, Groups, Memory, Tasks, Scheduled tasks, Usage*. It
+  lists the four providers, each with a masked key field, **Save**, **Remove**
+  and **Test connection**. The keys are encrypted with Windows' own key store
+  and never travel over HTTP.
 - **A per-user Windows installer**, and the **packaged app** is verified by
   running it: the window appears, the client renders with its stylesheet, the
   backend answers, and the page's own API calls are authenticated

@@ -607,7 +607,7 @@ means the same checker covers it.
 | Desktop | `npm run test:desktop` | 30/30 |
 | Integration | `npm run test:integration` | 54/54 |
 | Upstream | `npm run test:upstream` | 343/343 |
-| Shell | `npm run test:smoke:shell` | **25/25 checks passed** |
+| Shell | `npm run test:smoke:shell` | **31/31 checks passed** |
 
 The shell smoke test now proves the origin fix end to end: the page is served
 from `http://127.0.0.1:<port>/bot`, the client's stylesheet loaded
@@ -690,10 +690,50 @@ packaged self-check now **wait** for the cards, and the packaged verification
 is run five times in a row
 (`scripts/verify-package-repeatedly.ps1`) — five runs, five passes.
 
+### The upstream sidebar now carries the Providers section
+
+The user asked for the Providers section to be in the Mini App's own settings
+sidebar — the one with *General, Bots, Groups, Memory, Tasks, Scheduled
+tasks, Usage*.
+
+That sidebar is upstream code, and the port's rule had been that the vendored
+client stays byte-identical. The rule was wrong, and it was wrong in the way
+that matters: it protected the client's **layout and artwork** by also
+excluding the one thing the user needed.
+
+So the client gained **one** section, in three files:
+
+| File | What changed |
+|---|---|
+| `miniapp/client/panels.js` | the `Providers` entry in `PAGES`, and the page body |
+| `miniapp/client/core.js` | one icon path (`plug`) |
+| `miniapp/client/strings-panels.js` | ten new strings, English and Chinese |
+
+The page renders a row per provider — a masked key field, **Save**,
+**Remove**, **Test connection** — using the upstream's own `h()` helper and
+its own `set-row` / `set-group` / `soft` / `muted` classes. Nothing about
+the sidebar's layout or appearance moved.
+
+**The keys never travel over HTTP.** The page reads and writes them through
+the desktop app's own bridge, `window.minibots`, which the preload exposes
+in the chat window too. The page is told only *which* providers are
+configured; a configured provider's field shows a mask. When the Mini App
+runs without the desktop app the bridge is absent, and the page says so
+instead of failing.
+
+**The rule is now a named list, not a count.** `scripts/verify-upstream.mjs`
+used to report "client files changed: 0" and pass whatever it found. It now
+**names** the three allowed client files and **fails** if any other client
+file changes — so the section cannot grow, and the client's layout and
+artwork cannot move without the check noticing.
+
+The upstream suite still passes **343/343**: the change is entirely in the
+client, and the upstream's tests cover the engine.
+
 ### What this cost
 
 The suite was green throughout: 4/4 type checks, 17/17, 30/30, 54/54,
-343/343 upstream, 22/22 → 30/30 Electron, 21/21 → 25/25 shell, 34/34
+343/343 upstream, 22/22 → 30/30 Electron, 21/21 → 25/25 → 31/31 shell, 34/34
 package. **Every one of them passed while the app had no way to enter an
 API key.**
 
@@ -999,7 +1039,7 @@ It confirms, against the built artifact:
 | Integration | `npm run test:integration` | 54/54 |
 | Upstream | `npm run test:upstream` | 343/343 |
 | Electron desktop | `scripts/desktop-tests.mjs` | **30/30 checks passed** |
-| Shell | `npm run test:smoke:shell` | **25/25 checks passed** |
+| Shell | `npm run test:smoke:shell` | **31/31 checks passed** |
 | Package | `npm run verify:package` | **34/34 checks passed** |
 | Providers | `npm run test:providers` | **UNTESTED** — no key configured |
 

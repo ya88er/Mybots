@@ -365,19 +365,24 @@ Partially complete.
     `tests/desktop/` → **30/30**.
   - `scripts/desktop-tests.mjs` → **30/30 checks passed** (the tray and the
     window's lifecycle, inside a real Electron process).
-  - `scripts/smoke-electron-shell.mjs` → **25/25 checks passed**.
+  - `scripts/smoke-electron-shell.mjs` → **31/31 checks passed**.
 - [x] The user can enter a provider key.
-  - **Proven.** The app's own window — the provider settings — is opened by
-    the tray's **Settings…** item, and it shows four visible key fields and a
-    Save button. Both the shell smoke test and the **packaged** self-check
-    drive that path, the same function the tray item calls.
-  - The tray's items are labelled in the user's language and follow a change
-    of language.
-  - This was **not** true before the M6 review: the app shipped with no way
-    to reach the provider settings at all. The upstream client's avatar opens
-    the Mini App's own settings, and the upstream client is preserved
-    byte-for-byte. The whole suite was green while this was broken.
-  - Full detail: `docs/runtime-validation.md` §13.
+  - **Proven.** The Mini App's own **Settings** sidebar — the one with
+    *General, Bots, Groups, Memory, Tasks, Scheduled tasks, Usage* — has a
+    **Providers** section, between *General* and *Bots*. It renders a row per
+    provider with a masked key field, **Save**, **Remove** and **Test
+    connection**.
+  - The keys are read and written through the desktop app's own bridge, never
+    over HTTP: the page is told only *which* providers are configured, and a
+    configured provider's field shows a mask.
+  - Both the shell smoke test and the **packaged** self-check drive that path,
+    so the shipped artifact proves a key can be entered.
+  - This required **one documented change to the upstream client** — three
+    files, and the verification fails if any *other* client file changes.
+    The upstream's own layout, artwork and behaviour are untouched, and the
+    upstream suite still passes **343/343**.
+  - Full detail: `docs/runtime-validation.md` §13 and
+    `vendor/minimax-bot/MODIFICATIONS.md` §7.
 - [x] Packaged assets, native modules, and Pi resources are present and load successfully.
   - **Proven** by `npm run verify:package`, which inspects the **built**
     artifact rather than the source tree, and then launches it.
@@ -450,7 +455,7 @@ Partially complete.
 | Electron / embedded Node | **45.1.0**, embedded Node **v24.22.1**, ABI 150 |
 | Pi package | **1.4.0**, exports verified (32/32 Node, 10/10 Electron utility process) |
 | Windows version tested | Windows 11 x64, `DESKTOP-V2KHC9K`, Node v24.22.1 |
-| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 30/30. `npm run test:smoke:shell` → 25/25. `scripts/desktop-tests.mjs` → 30/30. `npm run verify:package` → 34/34 |
+| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 30/30. `npm run test:smoke:shell` → 31/31. `scripts/desktop-tests.mjs` → 30/30. `npm run verify:package` → 34/34 |
 | Provider test report | **UNTESTED** — `npm run test:providers` ran and reported UNTESTED for all four providers, with the reason ("no key is configured"). Not a pass |
 | Installer path | `release/MiniBots-Setup-0.1.0-x64.exe` |
 | Installer SHA-256 | `release/SHA256SUMS.txt` — written by the packaging run |

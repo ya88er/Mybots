@@ -268,11 +268,24 @@ export default {
     'panels.settings.title': '设置',
     'panels.settings.close': '关闭设置',
     'panels.settings.page.general': '通用',
+    'panels.settings.page.providers': '服务商',
     'panels.settings.page.bots': 'Bot',
     'panels.settings.page.groups': '群聊',
     'panels.settings.page.memory': '记忆',
     'panels.settings.page.schedules': '定时任务',
     'panels.settings.page.usage': '用量',
+
+    // settings › providers
+    'panels.providers.loading': '正在加载…',
+    'panels.providers.save': '保存',
+    'panels.providers.remove': '移除',
+    'panels.providers.test': '测试连接',
+    'panels.providers.testing': '正在测试…',
+    'panels.providers.configured': '已配置',
+    'panels.providers.notConfigured': '未配置',
+    'panels.providers.ok': '连接正常',
+    'panels.providers.failed': '失败：',
+    'panels.providers.unavailable': '服务商设置由桌面应用提供，请在此应用中打开。',
 
     // settings › general
     'panels.general.userName': '你的名字',
@@ -631,11 +644,24 @@ export default {
     'panels.settings.title': 'Settings',
     'panels.settings.close': 'Close settings',
     'panels.settings.page.general': 'General',
+    'panels.settings.page.providers': 'Providers',
     'panels.settings.page.bots': 'Bots',
     'panels.settings.page.groups': 'Groups',
     'panels.settings.page.memory': 'Memory',
     'panels.settings.page.schedules': 'Scheduled tasks',
     'panels.settings.page.usage': 'Usage',
+
+    // settings › providers
+    'panels.providers.loading': 'Loading…',
+    'panels.providers.save': 'Save',
+    'panels.providers.remove': 'Remove',
+    'panels.providers.test': 'Test connection',
+    'panels.providers.testing': 'Testing…',
+    'panels.providers.configured': 'Configured',
+    'panels.providers.notConfigured': 'Not configured',
+    'panels.providers.ok': 'Connection is good',
+    'panels.providers.failed': 'Failed:',
+    'panels.providers.unavailable': 'Provider settings are provided by the desktop app. Open them there.',
 
     // settings › general
     'panels.general.userName': 'Your name',
