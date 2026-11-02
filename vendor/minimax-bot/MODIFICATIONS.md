@@ -226,6 +226,14 @@ styling; the only new thing is one icon path (`plug`) in the icon set.
 
 **Strings.** Ten new keys, in both English and Chinese.
 
+**That the Save button works.** The packaged app's own self-check types a probe
+key into this section's **own** field and clicks this section's **own** Save
+button — no injection behind the page, no bridge call that bypasses the
+button — and then asserts that the provider is configured, that the backend is
+still answering, that the key is never read back out, and that the key can be
+removed again. It leaves no key behind. That check lives in the desktop app,
+not in the upstream, so it adds nothing to the three changed files.
+
 **The upstream suite still passes 343/343**, with no test modified: the
 change is entirely in the client, and the upstream's tests cover the engine.
 

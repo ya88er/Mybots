@@ -377,11 +377,22 @@ Partially complete.
     configured provider's field shows a mask.
   - Both the shell smoke test and the **packaged** self-check drive that path,
     so the shipped artifact proves a key can be entered.
+  - **The Save button really saves it.** The packaged app's own self-check
+    types a probe key into the sidebar's **own** field, clicks the sidebar's
+    **own** Save button — nothing is injected behind the page and no bridge
+    call bypasses the button — and then asserts that the provider is
+    configured afterwards, that the backend is still answering, that the key
+    is **never read back out**, and that the key can be removed again.
+    `npm run verify:package` → **34/34**, and the packaged self-check inside it
+    → **21/21**.
+  - The check leaves **no key behind**: the removal is part of the check and
+    the final state is asserted empty, so a fake key can never linger in the
+    user's credential store.
   - This required **one documented change to the upstream client** — three
     files, and the verification fails if any *other* client file changes.
     The upstream's own layout, artwork and behaviour are untouched, and the
     upstream suite still passes **343/343**.
-  - Full detail: `docs/runtime-validation.md` §13 and
+  - Full detail: `docs/runtime-validation.md` §13 and §15, and
     `vendor/minimax-bot/MODIFICATIONS.md` §7.
 - [x] Packaged assets, native modules, and Pi resources are present and load successfully.
   - **Proven** by `npm run verify:package`, which inspects the **built**
@@ -455,9 +466,9 @@ Partially complete.
 | Electron / embedded Node | **45.1.0**, embedded Node **v24.22.1**, ABI 150 |
 | Pi package | **1.4.0**, exports verified (32/32 Node, 10/10 Electron utility process) |
 | Windows version tested | Windows 11 x64, `DESKTOP-V2KHC9K`, Node v24.22.1 |
-| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 30/30. `npm run test:smoke:shell` → 31/31. `scripts/desktop-tests.mjs` → 30/30. `npm run verify:package` → 34/34 |
+| Automated report | `npm run test:upstream` → 343/343. `npm run test:runtime` → 17/17. `npm run test:integration` → 54/54. `npm run test:desktop` → 30/30. `npm run test:smoke:shell` → 31/31. `scripts/desktop-tests.mjs` → 30/30. `npm run verify:package` → 34/34 (packaged self-check inside it → 21/21) |
 | Provider test report | **UNTESTED** — `npm run test:providers` ran and reported UNTESTED for all four providers, with the reason ("no key is configured"). Not a pass |
 | Installer path | `release/MiniBots-Setup-0.1.0-x64.exe` |
 | Installer SHA-256 | `release/SHA256SUMS.txt` — written by the packaging run |
 | Signing status | **Unsigned.** `signAndEditExecutable: false`, because `rcedit` needs Developer Mode or administrator rights. The installer and the Start menu entry carry the app's icon; the executable keeps Electron's own |
-| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§15 |
+| Known limitations | See implementation plan section 15, plus `docs/runtime-validation.md` §10–§16 |

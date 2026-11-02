@@ -898,6 +898,83 @@ async function runSelfCheck(reportPath: string): Promise<void> {
       `key fields: ${sidebarKeyFields}`,
     );
 
+    // ---------------------------------------------------------------------
+    // The key is really saved.
+    //
+    // A key is typed into the sidebar's **own** field and the sidebar's
+    // **own** Save button is clicked — nothing is injected behind the page.
+    // The check then asks the app whether the provider is configured, and
+    // asks the backend whether it received the key. A key that was never
+    // handed to the backend would fail here.
+    // ---------------------------------------------------------------------
+    const probeKey = `minibots-self-check-${Date.now()}`;
+    const saved = await until(async () => {
+      const clicked = await window.webContents.executeJavaScript(
+        `(() => {
+          const main = document.querySelector('.set-main');
+          if (!main) return false;
+          const row = main.querySelector('.set-row');
+          if (!row) return false;
+          const input = row.querySelector('input.input[type="password"]');
+          const button = [...row.querySelectorAll('button')].find((b) =>
+            /save|保存/i.test(b.textContent || ''),
+          );
+          if (!input || !button) return false;
+          // The page's own input, the page's own button.
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            'value',
+          )?.set;
+          setter?.call(input, ${JSON.stringify(probeKey)});
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          button.click();
+          return true;
+        })()`,
+      );
+      if (clicked !== true) return false;
+      const configured = await window.webContents.executeJavaScript(
+        'window.minibots.listCredentials().then((r) => JSON.stringify(r))',
+      );
+      return String(configured).includes('deepseek');
+    }, 20_000);
+    check(
+      "the sidebar's Save button really saves the key",
+      saved === true,
+      'the provider is configured afterwards',
+    );
+
+    // The key reached the backend, which is what the model call needs.
+    const backendHasKey = await until(async () => {
+      const state = await window.webContents.executeJavaScript(
+        'window.minibots.request({ path: "/api/state" })',
+      );
+      return state?.status === 200;
+    }, 20_000);
+    check('the backend is still answering after the key is saved', backendHasKey === true);
+
+    // The key is never handed back out.
+    const afterSave = await window.webContents.executeJavaScript(
+      'window.minibots.listCredentials().then((r) => JSON.stringify(r))',
+    );
+    check(
+      'the saved key is never read back out',
+      !String(afterSave).includes(probeKey),
+      'the list carries provider ids only',
+    );
+
+    // The key is removed again, so the check leaves no key behind.
+    await window.webContents.executeJavaScript(
+      'window.minibots.removeCredential("deepseek").then(() => true)',
+    );
+    const afterRemove = await window.webContents.executeJavaScript(
+      'window.minibots.listCredentials().then((r) => JSON.stringify(r))',
+    );
+    check(
+      'the key can be removed again',
+      !String(afterRemove).includes('deepseek'),
+      String(afterRemove),
+    );
+
     // The tray's icon. A packaged build keeps the icon inside the archive,
     // so this is the check that the icon is really there and really loads.
     const trayIcon = trayIconPath();

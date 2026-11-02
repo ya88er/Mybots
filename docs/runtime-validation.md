@@ -1045,7 +1045,88 @@ It confirms, against the built artifact:
 
 ---
 
-## 15. What is still unverified
+## 15. M6.3 — the key really saves, in the shipped artifact
+
+The M6.2 work added a **Providers** section to the Mini App's own settings
+sidebar and the smoke test proved the page *renders*. That is not the same
+thing as proving that a key typed into that page is *kept*. A page can render
+perfectly while its Save button does nothing.
+
+So the packaged app's own self-check now proves the whole path, end to end,
+inside the shipped artifact:
+
+1. The self-check types a probe key into the sidebar's **own** input — via
+   the native `HTMLInputElement.prototype.value` setter, so the page's own
+   `input.value` read sees the value rather than a detached string;
+2. it clicks the sidebar's **own** Save button — nothing is injected behind
+   the page, and no bridge call bypasses the button;
+3. it asks the app whether the provider is now configured;
+4. it asks the backend whether it is still answering, which is the check that
+   matters most: a key that never reached the backend would break every real
+   model call while the settings page still looked right;
+5. it asks the app for the credential list and asserts the probe key **is not
+   in it** — the list carries provider ids only, never the key;
+6. it removes the key again and asserts the provider is gone.
+
+The four new checks, as the packaged app reports them:
+
+```
+PASS  the sidebar's Save button really saves the key — the provider is configured afterwards
+PASS  the backend is still answering after the key is saved
+PASS  the saved key is never read back out — the list carries provider ids only
+PASS  the key can be removed again — {"providers":[]}
+```
+
+The packaged app's self-check is now **21/21**, and the package verification
+is **34/34**.
+
+### The check leaves no key behind
+
+This matters more than it sounds. A self-check that writes a key and forgets
+it would leave a *fake* key in the user's credential store, and the next real
+run of the app would offer a provider that is configured but cannot work.
+
+The removal is therefore part of the check, not a cleanup step after it, and
+the check asserts the final state is empty rather than merely "the key is
+gone". The credential file on this machine reads:
+
+```json
+{
+  "version": 1,
+  "credentials": []
+}
+```
+
+That was verified **after** a full `verify:package` run, not before it.
+
+### The verification run, as a whole
+
+| Suite | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | 4/4 configurations pass |
+| Runtime | `npm run test:runtime` | 17/17 |
+| Desktop | `npm run test:desktop` | 30/30 |
+| Integration | `npm run test:integration` | 54/54 |
+| Upstream | `npm run test:upstream` | 343/343 |
+| Electron desktop | `scripts/desktop-tests.mjs` | **30/30 checks passed** |
+| Shell | `npm run test:smoke:shell` | **31/31 checks passed** |
+| Package | `npm run verify:package` | **34/34 checks passed** |
+| Packaged self-check | inside `verify:package` | **21/21 checks passed** |
+| Providers | `npm run test:providers` | **UNTESTED** — no key configured |
+
+The upstream client allow-list is still intact: **3** client files changed,
+**0** changed unexpectedly.
+
+### What this does *not* prove
+
+It proves the key is stored, encrypted, and removed correctly, and that the
+backend survives it. It does **not** prove a live provider call works: no
+provider key is configured on this machine, so the four live-provider rows in
+`docs/ACCEPTANCE.md` remain **UNTESTED**. That is unchanged by M6.3.
+
+---
+
+## 16. What is still unverified
 
 | Item | Status | Why |
 |---|---|---|
